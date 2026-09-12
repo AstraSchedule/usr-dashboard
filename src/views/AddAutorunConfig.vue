@@ -173,7 +173,7 @@ function addEntry() {
 }
 
 function duplicateEntry(index) {
-  const copy = JSON.parse(JSON.stringify(form.entries[index]))
+  const copy = structuredClone(form.entries[index])
   copy.id = ''
   form.entries.splice(index + 1, 0, copy)
 }
@@ -356,57 +356,88 @@ async function fillCounterpart(entry, from) {
 // ============================================================
 // 课程表自动填充
 // ============================================================
-async function autoFillSchedule(target) {
+// 收集作用域内各班在该日的课程模板；节次数不一致时返回 null 并弹冲突提示
+async function collectScheduleCandidates(date) {
+  const classList = collectClassesFromScopes(form.scope)
+  if (classList.length === 0) {
+    message.warning('请选择包含班级的生效域')
+    return null
+  }
+  const weekday = new Date(date).getDay()
+  const results = await Promise.allSettled(classList.map(c => fetchClassScheduleTemplateByWeekday({
+    school: c.school, grade: c.grade, cls: c.cls, weekday
+  })))
+  const ok = []
+  results.forEach((r, idx) => {
+    if (r.status !== 'fulfilled') return
+    const data = r.value?.data || {}
+    const timetableLabel = String(data.timetableLabel || '')
+    const needRaw = timetableLabel ? Number(needByLabelMap.value.get(timetableLabel)) : -1
+    ok.push({
+      cls: classList[idx],
+      periods: Array.isArray(data.periods) ? data.periods : [],
+      timetableLabel,
+      needRaw,
+      option: timetableLabel ? timetableOpts.value.find(o => o.label === timetableLabel) : null
+    })
+  })
+  if (ok.length === 0) {
+    message.error('未能获取到任何班级的课程模板')
+    return null
+  }
+  if (new Set(ok.map(x => toCount(x.needRaw))).size > 1) {
+    conflictMsg.value = '所选作用域内不同班级在该日的作息表节次数不一致，无法自动填充：\n' +
+        ok.map(x => x.cls.value + '：作息表"' + (x.timetableLabel || '未知') + '" -> ' + toCount(x.needRaw) + ' 节').join('\n')
+    showConflict.value = true
+    return null
+  }
+  return ok
+}
+
+// 取出现次数最多的模板（并列取先出现的），避免随机选取导致同一操作结果不可复现
+function pickMostCommonTemplate(candidates) {
+  const groups = new Map()
+  for (const item of candidates) {
+    const key = item.timetableLabel + '|' + item.periods.map(p => String(p.subject || '')).join(',')
+    const found = groups.get(key)
+    if (found) found.count++
+    else groups.set(key, { count: 1, item })
+  }
+  let best = null
+  for (const group of groups.values()) {
+    if (!best || group.count > best.count) best = group
+  }
+  return best.item
+}
+
+// 自动填充：rotationIndex 传数字表示作用于轮换表的某一行
+async function autoFillSchedule(target, rotationIndex) {
   const condition = target.when || {}
   const date = condition.kind === ConditionKind.DATE ? condition.date : null
   if (!date) {
     message.warning('自动填充需要「单日」条件，请先选择日期')
     return
   }
-  const classList = collectClassesFromScopes(form.scope)
-  if (classList.length === 0) {
-    message.warning('请选择包含班级的生效域')
-    return
-  }
   scheduleAutoFilling.value = true
   try {
-    const weekday = new Date(date).getDay()
-    const results = await Promise.allSettled(classList.map(c => fetchClassScheduleTemplateByWeekday({
-      school: c.school, grade: c.grade, cls: c.cls, weekday
-    })))
-    const ok = []
-    results.forEach((r, idx) => {
-      if (r.status !== 'fulfilled') return
-      const data = r.value?.data || {}
-      const timetableLabel = String(data.timetableLabel || '')
-      const needRaw = timetableLabel ? Number(needByLabelMap.value.get(timetableLabel)) : -1
-      ok.push({
-        cls: classList[idx],
-        periods: Array.isArray(data.periods) ? data.periods : [],
-        timetableLabel,
-        needRaw,
-        option: timetableLabel ? timetableOpts.value.find(o => o.label === timetableLabel) : null
-      })
-    })
-    if (ok.length === 0) {
-      message.error('未能获取到任何班级的课程模板')
-      return
-    }
-    if (new Set(ok.map(x => toCount(x.needRaw))).size > 1) {
-      conflictMsg.value = '所选作用域内不同班级在该日的作息表节次数不一致，无法自动填充：\n' +
-          ok.map(x => x.cls.value + '：作息表"' + (x.timetableLabel || '未知') + '" -> ' + toCount(x.needRaw) + ' 节').join('\n')
-      showConflict.value = true
-      return
-    }
-    const chosen = ok[Math.floor(Math.random() * ok.length)]
-    target.action.schedule = {
-      periods: chosen.periods.map((p, idx) => ({no: Number(p.no) || idx + 1, subject: String(p.subject || '')}))
+    const ok = await collectScheduleCandidates(date)
+    if (!ok) return
+    const chosen = pickMostCommonTemplate(ok)
+    const action = {
+      ...target.action,
+      schedule: { periods: chosen.periods.map((p, idx) => ({no: Number(p.no) || idx + 1, subject: String(p.subject || '')})) }
     }
     detectedNeedRaw.value = Number.isFinite(chosen.needRaw) ? chosen.needRaw : -1
     detectedTimetableId.value = chosen.option?.value || ''
     if (form.type === AutorunType.ALL) {
-      if (chosen.option) target.action.timetableId = chosen.option.value
+      if (chosen.option) action.timetableId = chosen.option.value
       else message.warning('未能从班级配置中识别出当日作息表，请手动选择作息表')
+    }
+    if (typeof rotationIndex === 'number') {
+      rotationRows.value[rotationIndex] = action
+    } else {
+      const idx = form.entries.indexOf(target)
+      if (idx >= 0) form.entries[idx] = {...target, action}
     }
     message.success('已按班级 ' + chosen.cls.value + ' 自动填充')
   } finally {
@@ -489,22 +520,36 @@ function validateCondition(when) {
   return ''
 }
 
+function validatePeriods(action) {
+  const periods = action.schedule?.periods || []
+  if (periods.length === 0) return '请至少填写一节课，或点击「按当前课表自动填充」'
+  const empty = periods.some(p => !p.subject || String(p.subject).trim() === '')
+  return empty ? '请为每一节选择科目' : ''
+}
+
+function validateClientSettings(action) {
+  return Object.keys(action.settings || {}).length === 0 ? '请至少选择一项客户端配置' : ''
+}
+
+function validateTimetableAction(action) {
+  return action.timetableId ? '' : '请选择作息表'
+}
+
+function validateAllAction(action) {
+  return action.timetableId ? validatePeriods(action) : '请选择作息表'
+}
+
+const actionValidators = {
+  [AutorunType.COMPENSATION]: (action) => (action.useDate ? '' : '请选择借用的上课日期'),
+  [AutorunType.TIMETABLE]: validateTimetableAction,
+  [AutorunType.ALL]: validateAllAction,
+  [AutorunType.SCHEDULE]: validatePeriods,
+  [AutorunType.CLIENT_CONFIG]: validateClientSettings
+}
+
 function validateAction(action) {
-  if (form.type === AutorunType.COMPENSATION && !action.useDate) return '请选择借用的上课日期'
-  if (form.type === AutorunType.TIMETABLE && !action.timetableId) return '请选择作息表'
-  if (form.type === AutorunType.ALL && !action.timetableId) return '请选择作息表'
-  if (form.type === AutorunType.SCHEDULE || form.type === AutorunType.ALL) {
-    const periods = action.schedule?.periods || []
-    if (periods.length === 0) return '请至少填写一节课，或点击「按当前课表自动填充」'
-    for (const p of periods) {
-      if (!p.subject || String(p.subject).trim() === '') return '请为每一节选择科目'
-    }
-  }
-  if (form.type === AutorunType.CLIENT_CONFIG) {
-    const settings = action.settings || {}
-    if (Object.keys(settings).length === 0) return '请至少选择一项客户端配置'
-  }
-  return ''
+  const validator = actionValidators[form.type]
+  return validator ? validator(action) : ''
 }
 
 function validate() {
@@ -637,7 +682,8 @@ async function confirmSave(pwd) {
                 :timetable-hint="''"
                 :subject-options="subjectsOpts"
                 :auto-filling="scheduleAutoFilling"
-                @auto-fill="autoFillSchedule({ when: { kind: ConditionKind.DATE, date: rotationTemplateDate }, action: row })"
+                @update:model-value="v => rotationRows[idx] = v"
+                @auto-fill="autoFillSchedule({ when: { kind: ConditionKind.DATE, date: rotationTemplateDate }, action: row }, idx)"
             />
           </n-card>
         </n-form-item>
@@ -673,6 +719,7 @@ async function confirmSave(pwd) {
                   :timetable-hint="''"
                   :subject-options="subjectsOpts"
                   :auto-filling="scheduleAutoFilling"
+                  @update:model-value="v => form.entries[idx].action = v"
                   @auto-fill="autoFillSchedule(entry)"
               />
             </n-form-item>

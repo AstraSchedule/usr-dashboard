@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRequest } from 'vue-request'
 import { useMessage, NButton, NCard, NForm, NFormItem, NInputNumber, NSelect } from 'naive-ui'
-import { AutorunType, fetchCompYearPairs, fetchScopeTree, flattenScope, saveAutorun } from '@/api/autorun.js'
+import { AutorunType, ConditionKind, fetchCompYearPairs, fetchScopeTree, flattenScope, saveTask } from '@/api/autorun.js'
 import { applyDisabledToScopeOptions, normalizeScopes } from '@/utils/scope.js'
 import ConfirmPasswordModal from '@/components/ConfirmPasswordModal.vue'
 
@@ -35,35 +35,21 @@ function buildImportScope() {
   return Array.isArray(scope.value) ? scope.value : []
 }
 
-async function processImportPairs(pairs, scopePayload, password) {
-  let ok = 0, fail = 0, aborted = false
-  for (const p of pairs) {
-    if (aborted) break
-    const { holiday, workday } = p || {}
-    if (!holiday || !workday) {
-      fail++
-      continue
-    }
-    const payload = {
-      type: AutorunType.COMPENSATION,
-      scope: scopePayload,
-      priority: 0,
-      content: { date: workday, useDate: holiday }
-    }
-    try {
-      await saveAutorun(payload, password)
-      ok++
-    } catch (e) {
-      const status = e?.status || e?.response?.status
-      if (status === 401) {
-        message.error('密码错误，已终止导入')
-        aborted = true
-        break
-      }
-      fail++
-    }
+// 一整年的调休是「一个任务 + N 条条目」，不再逐条创建规则刷屏
+function buildImportPayload(pairs, scopePayload, year) {
+  return {
+    name: year + ' 年调休',
+    type: AutorunType.COMPENSATION,
+    scope: scopePayload,
+    priority: 0,
+    enabled: true,
+    entries: pairs.map(p => ({
+      id: 'comp-' + p.workday,
+      enabled: true,
+      when: { kind: ConditionKind.DATE, date: p.workday },
+      action: { useDate: p.holiday }
+    }))
   }
-  return { ok, fail, aborted }
 }
 
 function openImport() {
@@ -78,19 +64,20 @@ async function doImport(password) {
   importing.value = true
   try {
     const { data } = await fetchCompYearPairs(importYear.value)
-    const pairs = Array.isArray(data?.pairs) ? data.pairs : []
+    const pairs = (Array.isArray(data?.pairs) ? data.pairs : []).filter(p => p?.holiday && p?.workday)
     if (pairs.length === 0) { message.warning('该年无调休数据'); return }
-    const scopePayload = buildImportScope()
-    const { ok, fail, aborted } = await processImportPairs(pairs, scopePayload, password)
-    if (ok > 0) {
-      const failPart = fail > 0 ? '，失败 ' + fail + ' 条' : ''
-      message.success('已导入 ' + ok + ' 条' + failPart)
-    } else if (!aborted) {
-      message.error('导入失败')
-    }
-    if (ok > 0 && !aborted) showPwd.value = false
+
+    await saveTask(buildImportPayload(pairs, buildImportScope(), importYear.value), password)
+    message.success('已导入 ' + pairs.length + ' 条调休条目（单个任务）')
+    showPwd.value = false
   } catch (e) {
-    if (!e?.response?.status) console.error(e)
+    const status = e?.status || e?.response?.status
+    const detail = e?.response?.data?.detail
+    if (status === 401) message.error('密码错误，已终止导入')
+    else if (status === 400) message.error(detail || '服务端校验不通过')
+    else if (status === 403) message.error('无权访问：有些门总是关着的')
+    else if (!status) console.error(e)
+    else message.error('导入失败（状态码：' + status + '）')
   } finally {
     importing.value = false
   }
@@ -114,7 +101,9 @@ async function doImport(password) {
       </n-form-item>
     </n-form>
 
-    <div style="font-size:12px;color:#888;margin-top:12px;">将按调休数据中的 workday 作为 date、holiday 作为 useDate 创建调休任务，并逐条提交到服务端。</div>
+    <div style="font-size:12px;color:#888;margin-top:12px;">
+      将创建 <b>一个</b> 名为「&lt;年份&gt; 年调休」的任务，调休数据中的每个 workday/holiday 对应任务内的一条条目（date=workday，useDate=holiday），整份数据一次提交。
+    </div>
   </n-card>
 
   <confirm-password-modal

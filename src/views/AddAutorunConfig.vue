@@ -67,6 +67,26 @@ const message = useMessage()
 const isEdit = computed(() => !!route.params.id)
 const title = computed(() => isEdit.value ? '编辑自动任务' : '新增自动任务')
 
+// 条目在界面上需要一个与数组下标无关的稳定标识：异步请求返回时数组可能已被增删，
+// 用下标定位会把结果写到错误的条目上。_key 只存在于前端，confirmSave 不会把它发给服务端。
+let entryKeySeq = 0
+
+function nextEntryKey() {
+  entryKeySeq += 1
+  return 'k' + entryKeySeq
+}
+
+function makeEntry(type) {
+  return {...createEntry(type), _key: nextEntryKey()}
+}
+
+function ensureEntryKeys(list) {
+  for (const entry of list) {
+    if (!entry._key) entry._key = nextEntryKey()
+  }
+  return list
+}
+
 const form = reactive({
   id: '',
   name: '',
@@ -74,7 +94,7 @@ const form = reactive({
   scope: [],
   priority: 0,
   enabled: true,
-  entries: [createEntry(AutorunType.COMPENSATION)]
+  entries: [makeEntry(AutorunType.COMPENSATION)]
 })
 
 // ============================================================
@@ -166,7 +186,7 @@ const suppressTypeWatch = ref(false)
 
 watch(() => form.type, (type, oldType) => {
   if (suppressTypeWatch.value || type === oldType) return
-  form.entries = [createEntry(type)]
+  form.entries = [makeEntry(type)]
   // 类型变了，轮换表里的内容结构也变了，必须丢弃旧行
   rotationRows.value = []
   resetRotationRows(rotationWeeks.value)
@@ -180,12 +200,13 @@ watch(() => form.type, (type, oldType) => {
 // 条目操作
 // ============================================================
 function addEntry() {
-  form.entries.push(createEntry(form.type))
+  form.entries.push(makeEntry(form.type))
 }
 
 function duplicateEntry(index) {
   const copy = structuredClone(form.entries[index])
   copy.id = ''
+  copy._key = nextEntryKey()
   form.entries.splice(index + 1, 0, copy)
 }
 
@@ -347,26 +368,35 @@ function compDateOf(entry) {
   return entry?.when?.kind === ConditionKind.DATE ? entry.when.date : null
 }
 
-async function fillCounterpart(entry, index, from) {
+// 按稳定 key 定位条目：请求期间用户可能删除或复制条目，下标会指向别的条目
+function locateEntry(key) {
+  const index = form.entries.findIndex(e => e._key === key)
+  return index >= 0 ? {index, entry: form.entries[index]} : null
+}
+
+async function fillCounterpart(key, from) {
   if (form.type !== AutorunType.COMPENSATION) return
+  const located = locateEntry(key)
+  if (!located || compFilling.value[key]) return
+  const { entry } = located
   const date = compDateOf(entry)
   const useDate = entry.action.useDate
-  if (compFilling.value[index]) return
-  compFilling.value[index] = true
+  compFilling.value[key] = true
   try {
-    if (from === 'holiday' && useDate && !date) {
-      const { data } = await fetchCompByHoliday(useDate)
-      const filled = data?.compensation
-      if (filled) form.entries[index] = {...entry, when: {...entry.when, date: filled}}
-    } else if (from === 'workday' && date && !useDate) {
-      const { data } = await fetchCompByWorkday(date)
-      const filled = data?.compensation
-      if (filled) {
-        form.entries[index] = {...entry, action: {...entry.action, useDate: filled}}
-      }
+    const filled = from === 'holiday'
+        ? (useDate && !date ? (await fetchCompByHoliday(useDate))?.data?.compensation : null)
+        : (date && !useDate ? (await fetchCompByWorkday(date))?.data?.compensation : null)
+    if (!filled) return
+    // 请求返回后重新定位：条目已被删除/复制时直接丢弃结果
+    const target = locateEntry(key)
+    if (!target) return
+    if (from === 'holiday') {
+      target.entry.when = {...target.entry.when, date: filled}
+    } else {
+      target.entry.action = {...target.entry.action, useDate: filled}
     }
   } finally {
-    compFilling.value[index] = false
+    compFilling.value[key] = false
   }
 }
 
@@ -388,6 +418,8 @@ async function collectScheduleCandidates(date) {
   results.forEach((r, idx) => {
     if (r.status !== 'fulfilled') return
     const data = r.value?.data || {}
+    // 请求失败（或当天没有节次）的空模板不能作为填充来源，否则会把已填课程清空
+    if (data.failed || !Array.isArray(data.periods) || data.periods.length === 0) return
     const timetableLabel = String(data.timetableLabel || '')
     const needRaw = timetableLabel ? Number(needByLabelMap.value.get(timetableLabel)) : -1
     ok.push({
@@ -399,7 +431,7 @@ async function collectScheduleCandidates(date) {
     })
   })
   if (ok.length === 0) {
-    message.error('未能获取到任何班级的课程模板')
+    message.error('未获取到可用的课程模板（可能是休息日、班级未配置课表或接口请求失败）')
     return null
   }
   if (new Set(ok.map(x => toCount(x.needRaw))).size > 1) {
@@ -453,8 +485,8 @@ async function autoFillSchedule(target, rotationIndex) {
     if (typeof rotationIndex === 'number') {
       rotationRows.value[rotationIndex] = action
     } else {
-      const idx = form.entries.indexOf(target)
-      if (idx >= 0) form.entries[idx] = {...target, action}
+      const located = locateEntry(target._key)
+      if (located) located.entry.action = action
     }
     message.success('已按班级 ' + chosen.cls.value + ' 自动填充')
   } finally {
@@ -475,8 +507,8 @@ function applyTask(d) {
   form.enabled = d.enabled !== false
   const entries = Array.isArray(d.entries) ? d.entries : []
   form.entries = entries.length > 0
-      ? entries.map(e => normalizeEntry(e, form.type))
-      : [createEntry(form.type)]
+      ? ensureEntryKeys(entries.map(e => normalizeEntry(e, form.type)))
+      : [makeEntry(form.type)]
   // 必须在赋值之后再注册：nextTick 回调一定排在本次 watcher 队列之后
   nextTick(() => { suppressTypeWatch.value = false })
   loadGradeOptions()
@@ -743,8 +775,8 @@ async function confirmSave(pwd) {
             </n-form-item>
 
             <n-space v-if="form.type === AutorunType.COMPENSATION" align="center">
-              <n-button size="small" :loading="!!compFilling[idx]" @click="fillCounterpart(entry, idx, 'holiday')" :disabled="!entry.action.useDate">由节假日反推工作日</n-button>
-              <n-button size="small" :loading="!!compFilling[idx]" @click="fillCounterpart(entry, idx, 'workday')" :disabled="!compDateOf(entry)">由工作日反推节假日</n-button>
+              <n-button size="small" :loading="!!compFilling[entry._key]" @click="fillCounterpart(entry._key, 'holiday')" :disabled="!entry.action.useDate">由节假日反推工作日</n-button>
+              <n-button size="small" :loading="!!compFilling[entry._key]" @click="fillCounterpart(entry._key, 'workday')" :disabled="!compDateOf(entry)">由工作日反推节假日</n-button>
             </n-space>
           </n-space>
         </n-card>

@@ -335,7 +335,8 @@ export async function fetchClassScheduleTemplateByWeekday({ school, grade, cls, 
     return {data: {periods, timetableLabel}}
   } catch (e) {
     console.warn('[autorun] fetchClassScheduleTemplateByWeekday fallback', e)
-    return {data: {periods: [], timetableLabel: ''}}
+    // failed 标记用于让调用方区分「请求失败」与「当天确实没有课」，避免用空模板覆盖已填内容
+    return {data: {periods: [], timetableLabel: '', failed: true}}
   }
 }
 

@@ -35,8 +35,9 @@ function setTimetableId(value) {
   patch({ timetableId: value })
 }
 
+// 对象展开对 null/undefined 是安全的空操作，无需 `|| {}` 兜底
 function setPeriods(list) {
-  patch({ schedule: Object.assign({}, props.modelValue.schedule, { periods: list }) })
+  patch({ schedule: {...props.modelValue.schedule, periods: list} })
 }
 
 function addPeriod() {
@@ -68,7 +69,7 @@ function settingState(key) {
 }
 
 function onSettingChange(key, state) {
-  const settings = Object.assign({}, props.modelValue.settings)
+  const settings = {...props.modelValue.settings}
   if (state === 'unset') delete settings[key]
   else settings[key] = state === 'on'
   patch({ settings })

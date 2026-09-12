@@ -36,7 +36,7 @@ function setTimetableId(value) {
 }
 
 function setPeriods(list) {
-  patch({ schedule: {...(props.modelValue.schedule || {}), periods: list} })
+  patch({ schedule: Object.assign({}, props.modelValue.schedule, { periods: list }) })
 }
 
 function addPeriod() {
@@ -68,7 +68,7 @@ function settingState(key) {
 }
 
 function onSettingChange(key, state) {
-  const settings = {...(props.modelValue.settings || {})}
+  const settings = Object.assign({}, props.modelValue.settings)
   if (state === 'unset') delete settings[key]
   else settings[key] = state === 'on'
   patch({ settings })

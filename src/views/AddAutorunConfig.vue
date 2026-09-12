@@ -383,9 +383,12 @@ async function fillCounterpart(key, from) {
   const useDate = entry.action.useDate
   compFilling.value[key] = true
   try {
-    const filled = from === 'holiday'
-        ? (useDate && !date ? (await fetchCompByHoliday(useDate))?.data?.compensation : null)
-        : (date && !useDate ? (await fetchCompByWorkday(date))?.data?.compensation : null)
+    let filled = null
+    if (from === 'holiday') {
+      if (useDate && !date) filled = (await fetchCompByHoliday(useDate))?.data?.compensation
+    } else if (date && !useDate) {
+      filled = (await fetchCompByWorkday(date))?.data?.compensation
+    }
     if (!filled) return
     // 请求返回后重新定位：条目已被删除/复制时直接丢弃结果
     const target = locateEntry(key)

@@ -2,7 +2,7 @@
 // 条目内容编辑器：按任务类型渲染对应的内容表单。
 // 组件不直接修改 modelValue，统一通过 update:modelValue 回传新对象（SonarQube S8951）。
 import { computed } from 'vue'
-import { NButton, NCard, NFormItem, NSelect, NSpace, NText } from 'naive-ui'
+import { NButton, NCard, NDatePicker, NFormItem, NSelect, NSpace, NText } from 'naive-ui'
 import { AutorunType, clientConfigSettingOptions } from '@/api/autorun.js'
 
 const props = defineProps({

@@ -76,7 +76,10 @@ async function doImport(password) {
     if (status === 401) message.error('密码错误，已终止导入')
     else if (status === 400) message.error(detail || '服务端校验不通过')
     else if (status === 403) message.error('无权访问：有些门总是关着的')
-    else if (!status) console.error(e)
+    else if (!status) {
+      console.error(e)
+      message.error('导入失败：请求未收到响应，请检查网络或服务端后重试')
+    }
     else message.error('导入失败（状态码：' + status + '）')
   } finally {
     importing.value = false

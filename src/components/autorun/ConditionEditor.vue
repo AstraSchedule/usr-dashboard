@@ -1,6 +1,6 @@
 <script setup>
 // 生效条件编辑器：单日 / 日期范围 / 每周轮换 / 时刻事件 / cron
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NDatePicker, NInput, NInputNumber, NSelect, NSpace } from 'naive-ui'
 import {
   AutorunType,
@@ -31,6 +31,13 @@ const needsPeriod = computed(() => isEventKind.value && when.value?.event !== Ev
 function onKindChange(next) {
   emit('update:modelValue', createCondition(next))
 }
+
+// NInputNumber 的 max 只限制输入，不会修正已有值：周期变短时同步把槽位钳制回合法范围
+watch(() => when.value?.everyWeeks, (every) => {
+  if (!when.value) return
+  const max = Math.max(0, (Number(every) || 1) - 1)
+  if ((Number(when.value.weekOffset) || 0) > max) when.value.weekOffset = max
+})
 
 function onWeekdaysChange(list) {
   if (!when.value) return

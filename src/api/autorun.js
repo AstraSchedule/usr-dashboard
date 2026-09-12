@@ -209,7 +209,11 @@ export function normalizeEntry(raw, type) {
   entry.action = {...createAction(type), ...action}
   if (type === AutorunType.SCHEDULE || type === AutorunType.ALL) {
     const periods = action?.schedule?.periods
-    entry.action.schedule = { periods: Array.isArray(periods) ? periods.map(p => ({no: Number(p.no) || 0, subject: String(p.subject || '')})) : [] }
+    entry.action.schedule = {
+      periods: Array.isArray(periods)
+          ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
+          : []
+    }
   }
   if (type === AutorunType.CLIENT_CONFIG) {
     const settings = {}

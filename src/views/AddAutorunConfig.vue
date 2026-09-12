@@ -88,7 +88,12 @@ const rotationTemplateDate = ref(null)
 const rotationAvailable = computed(() => form.type !== AutorunType.COMPENSATION)
 
 function emptyAction() {
-  return createAction(form.type)
+  const action = createAction(form.type)
+  // ALL 类型需要作息表：新行直接带上当前作用域下的第一个选项，避免保存时才报错
+  if (form.type === AutorunType.ALL && timetableOpts.value.length > 0) {
+    action.timetableId = timetableOpts.value[0].value
+  }
+  return action
 }
 
 function resetRotationRows(weeks) {
@@ -106,7 +111,13 @@ function switchView(mode) {
       rotationWeeks.value = grouped.everyWeeks
       rotationRows.value = grouped.rows
     } else {
+      // 当前条目不是「同周期铺满的每周轮换」，无法还原成表格：
+      // 用首条条目的内容预填第一行，并明确提示保存时会按轮换表展开
+      const seed = form.entries[0]?.action
+      rotationRows.value = []
       resetRotationRows(rotationWeeks.value)
+      if (seed) rotationRows.value[0] = structuredClone(seed)
+      message.info('当前条目不是单一的每周轮换，轮换表保存时会展开为 ' + rotationRows.value.length + ' 条每周轮换条目')
     }
   } else {
     const generated = rotationToEntries()
@@ -326,7 +337,8 @@ const computedScopeOptions = computed(() => applyDisabledToScopeOptions(scopeSel
 // ============================================================
 // 调休：按日期反推
 // ============================================================
-const autoFilling = ref(false)
+// 反推按钮按条目隔离 loading，避免一个条目请求时其它条目按钮一起转圈
+const compFilling = ref({})
 const scheduleAutoFilling = ref(false)
 const showConflict = ref(false)
 const conflictMsg = ref('')
@@ -335,21 +347,26 @@ function compDateOf(entry) {
   return entry?.when?.kind === ConditionKind.DATE ? entry.when.date : null
 }
 
-async function fillCounterpart(entry, from) {
+async function fillCounterpart(entry, index, from) {
   if (form.type !== AutorunType.COMPENSATION) return
   const date = compDateOf(entry)
   const useDate = entry.action.useDate
-  autoFilling.value = true
+  if (compFilling.value[index]) return
+  compFilling.value[index] = true
   try {
     if (from === 'holiday' && useDate && !date) {
       const { data } = await fetchCompByHoliday(useDate)
-      if (data?.compensation) entry.when = {...entry.when, date: data.compensation}
+      const filled = data?.compensation
+      if (filled) form.entries[index] = {...entry, when: {...entry.when, date: filled}}
     } else if (from === 'workday' && date && !useDate) {
       const { data } = await fetchCompByWorkday(date)
-      if (data?.compensation) entry.action.useDate = data.compensation
+      const filled = data?.compensation
+      if (filled) {
+        form.entries[index] = {...entry, action: {...entry.action, useDate: filled}}
+      }
     }
   } finally {
-    autoFilling.value = false
+    compFilling.value[index] = false
   }
 }
 
@@ -450,7 +467,6 @@ async function autoFillSchedule(target, rotationIndex) {
 // ============================================================
 function applyTask(d) {
   suppressTypeWatch.value = true
-  nextTick(() => { suppressTypeWatch.value = false })
   form.id = d.id || ''
   form.name = d.name || ''
   form.type = Number(d.type)
@@ -461,6 +477,8 @@ function applyTask(d) {
   form.entries = entries.length > 0
       ? entries.map(e => normalizeEntry(e, form.type))
       : [createEntry(form.type)]
+  // 必须在赋值之后再注册：nextTick 回调一定排在本次 watcher 队列之后
+  nextTick(() => { suppressTypeWatch.value = false })
   loadGradeOptions()
 }
 
@@ -725,8 +743,8 @@ async function confirmSave(pwd) {
             </n-form-item>
 
             <n-space v-if="form.type === AutorunType.COMPENSATION" align="center">
-              <n-button size="small" :loading="autoFilling" @click="fillCounterpart(entry, 'holiday')" :disabled="!entry.action.useDate">由节假日反推工作日</n-button>
-              <n-button size="small" :loading="autoFilling" @click="fillCounterpart(entry, 'workday')" :disabled="!compDateOf(entry)">由工作日反推节假日</n-button>
+              <n-button size="small" :loading="!!compFilling[idx]" @click="fillCounterpart(entry, idx, 'holiday')" :disabled="!entry.action.useDate">由节假日反推工作日</n-button>
+              <n-button size="small" :loading="!!compFilling[idx]" @click="fillCounterpart(entry, idx, 'workday')" :disabled="!compDateOf(entry)">由工作日反推节假日</n-button>
             </n-space>
           </n-space>
         </n-card>

@@ -169,6 +169,8 @@ function rotationToEntries() {
   for (let i = 0; i < rotationRows.value.length; i++) {
     out.push({
       id: '',
+      // 与列表视图一致：条目必须有稳定 key，异步请求返回才能按 key 重新定位
+      _key: nextEntryKey(),
       enabled: true,
       note: '',
       when: {kind: ConditionKind.WEEKLY, everyWeeks: rotationRows.value.length, weekOffset: i},
@@ -320,19 +322,43 @@ async function loadGradeOptions() {
     needByLabelMap.value = new Map()
     return
   }
-  const [{options, needMap: labelNeedMap}, {options: subs}] = await Promise.all([
-    fetchTimetableOptions(pair.school, pair.grade),
-    fetchSubjectsOptions(pair.school, pair.grade)
-  ])
-  needByLabelMap.value = labelNeedMap instanceof Map ? labelNeedMap : new Map(options.map(o => [o.label, Number(o.need) || 0]))
+  let options = []
+  let labelNeedMap = new Map()
+  let subs = []
+  try {
+    const [timetableResult, subjectResult] = await Promise.all([
+      fetchTimetableOptions(pair.school, pair.grade),
+      fetchSubjectsOptions(pair.school, pair.grade)
+    ])
+    options = Array.isArray(timetableResult?.options) ? timetableResult.options : []
+    labelNeedMap = timetableResult?.needMap instanceof Map ? timetableResult.needMap : new Map()
+    subs = Array.isArray(subjectResult?.options) ? subjectResult.options : []
+  } catch (e) {
+    // 选项拉取失败不应该让编辑器崩掉：清空选项并提示，用户改生效域后可重试
+    console.warn('[autorun] 作息表/科目选项获取失败', e)
+    message.warning('作息表与科目选项获取失败，请检查网络或稍后重试')
+    timetableOpts.value = []
+    subjectsOpts.value = []
+    needByLabelMap.value = new Map()
+    return
+  }
+  // needMap 正常由接口返回；缺失时按选项的 need 现场兜底，保持与旧行为一致
+  needByLabelMap.value = labelNeedMap instanceof Map && labelNeedMap.size > 0
+      ? labelNeedMap
+      : new Map(options.map(o => [o.label, Number(o.need) || 0]))
   subjectsOpts.value = subs
 
   if (form.type === AutorunType.TIMETABLE) {
     // 多年级时取交集，避免选出对部分生效域不可用的作息表
     const pairs = parseGradePairsFromScopes(form.scope)
-    timetableOpts.value = pairs.length > 1
-        ? intersectTimetableOptions(await Promise.all(pairs.map(p => fetchTimetableOptions(p.school, p.grade))))
-        : options
+    try {
+      timetableOpts.value = pairs.length > 1
+          ? intersectTimetableOptions(await Promise.all(pairs.map(p => fetchTimetableOptions(p.school, p.grade))))
+          : options
+    } catch (e) {
+      console.warn('[autorun] 作息表交集计算失败', e)
+      timetableOpts.value = options
+    }
   } else {
     timetableOpts.value = options
   }
@@ -743,7 +769,7 @@ async function confirmSave(pwd) {
       </template>
 
       <template v-else>
-        <n-card v-for="(entry, idx) in form.entries" :key="idx" size="small" style="margin-bottom:12px" :bordered="true">
+        <n-card v-for="(entry, idx) in form.entries" :key="entry._key" size="small" style="margin-bottom:12px" :bordered="true">
           <template #header>
             <n-space align="center">
               <n-tag size="small" :bordered="false">第 {{ idx + 1 }} 条</n-tag>

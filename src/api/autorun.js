@@ -1,41 +1,79 @@
 import axios from 'axios'
 import {APISRV} from '@/global.js'
 
-// 伪数据 API：自动任务（支持分类内容与多选生效）
-// 合同：所有函数返回 Promise，并在 120-200ms 之间模拟延迟
-// TaskItem: { id, type(0..3), scope: string[], content: object, priority(number), status('待生效'|'生效中'|'已过期') }
+// 自动任务 v2：一条记录 = 一个任务，任务内包含若干「条件 + 内容」条目
+// TaskItem: { id, name, type(0..4), scope: string[], priority(number), enabled(bool),
+//             status('待生效'|'生效中'|'已过期'), entries: EntryItem[] }
+// EntryItem: { id, enabled(bool), note, when: Condition|null, action: object }
 
 export const AutorunType = {
   COMPENSATION: 0,
   TIMETABLE: 1,
   SCHEDULE: 2,
-  ALL: 3
+  ALL: 3,
+  CLIENT_CONFIG: 4
 }
 
 export const autorunTypeOptions = [
   { label: '调休', value: AutorunType.COMPENSATION },
   { label: '作息表调整', value: AutorunType.TIMETABLE },
   { label: '课程表调整', value: AutorunType.SCHEDULE },
-  { label: '全部调整', value: AutorunType.ALL }
+  { label: '全部调整', value: AutorunType.ALL },
+  { label: '客户端配置', value: AutorunType.CLIENT_CONFIG }
 ]
 
-export const timetableOptions = [
-  { label: '默认作息表', value: 'default' },
-  { label: '考试周作息表', value: 'exam' },
-  { label: '暑期作息表', value: 'summer' }
+// 生效条件类型（与服务端 AutorunCondition.Kind 一致）
+export const ConditionKind = {
+  DATE: 'date',
+  RANGE: 'range',
+  WEEKLY: 'weekly',
+  EVENT: 'event',
+  CRON: 'cron'
+}
+
+export const conditionKindOptions = [
+  { label: '单日', value: ConditionKind.DATE },
+  { label: '日期范围', value: ConditionKind.RANGE },
+  { label: '每周轮换', value: ConditionKind.WEEKLY },
+  { label: '时刻事件', value: ConditionKind.EVENT },
+  { label: 'cron 表达式', value: ConditionKind.CRON }
+]
+
+export const EventKind = {
+  STARTUP: 'startup',
+  CLASS_START: 'class_start',
+  CLASS_END: 'class_end'
+}
+
+export const eventKindOptions = [
+  { label: '客户端启动时', value: EventKind.STARTUP },
+  { label: '第 N 节课上课时', value: EventKind.CLASS_START },
+  { label: '第 N 节课下课时', value: EventKind.CLASS_END }
+]
+
+// 自动任务可以覆盖的桌面端本地配置项
+export const clientConfigSettingOptions = [
+  { key: 'isWindowAlwaysOnTop', label: '窗口置顶' },
+  { key: 'isDuringClassHidden', label: '上课隐藏' },
+  { key: 'isAlwaysMinimized', label: '始终缩小' },
+  { key: 'isDuringClassCountdown', label: '课上计时' }
+]
+
+export const weekdayOptions = [
+  { label: '周日', value: 0 },
+  { label: '周一', value: 1 },
+  { label: '周二', value: 2 },
+  { label: '周三', value: 3 },
+  { label: '周四', value: 4 },
+  { label: '周五', value: 5 },
+  { label: '周六', value: 6 }
 ]
 
 export function getAutorunTypeLabel(typeValue) {
-  const found = autorunTypeOptions.find(o => o.value === typeValue)
+  const found = autorunTypeOptions.find(o => o.value === Number(typeValue))
   return found ? found.label : String(typeValue)
 }
 
-export function getTimetableLabel(id) {
-  const found = timetableOptions.find(o => o.value === id)
-  return found ? found.label : String(id)
-}
-
-// 将后端的类型字符串映射为本地数值枚举
 export function decodeAutorunType(t) {
   if (typeof t === 'number') return t
   const s = String(t || '').toUpperCase()
@@ -43,7 +81,7 @@ export function decodeAutorunType(t) {
   if (s === 'TIMETABLE') return AutorunType.TIMETABLE
   if (s === 'SCHEDULE') return AutorunType.SCHEDULE
   if (s === 'ALL') return AutorunType.ALL
-  // 默认返回原值（可能是未知类型字符串）
+  if (s === 'CLIENT_CONFIG') return AutorunType.CLIENT_CONFIG
   return t
 }
 
@@ -53,6 +91,7 @@ export function encodeScope(level, school, grade, cls) {
   if (level === 'class') return `${school}/${grade}/${cls}`
   return String(level)
 }
+
 export function parseScope(value) {
   const raw = String(value || '')
   const parts = raw.split('/').filter(s => s !== '')
@@ -125,145 +164,160 @@ export function flattenScope(nodes, prefix = '') {
   return out
 }
 
-// 初始伪数据（若干条）
-const store = [
-  {
-    id: 'task-001',
-    type: AutorunType.COMPENSATION,
-    scope: [encodeScope('school', '39')],
-    content: {date: '2025-10-02', useDate: '2025-09-29'},
-    priority: 10,
-    status: '待生效'
-  },
-  {
-    id: 'task-002',
-    type: AutorunType.TIMETABLE,
-    scope: [encodeScope('grade', '39', '2023')],
-    content: {date: '2025-10-08', timetableId: 'exam'},
-    priority: 20,
-    status: '生效中'
-  },
-  {
-    id: 'task-003',
-    type: AutorunType.SCHEDULE,
-    scope: [encodeScope('class', '39', '2023', '1')],
-    content: {date: '2025-10-09', schedule: {periods: [{no: 1, subject: '语文'}, {no: 2, subject: '数学'}]}},
-    priority: 30,
-    status: '已过期'
-  },
-  {
-    id: 'task-004',
-    type: AutorunType.ALL,
-    scope: [encodeScope('school', '39')],
-    content: {date: '2025-10-10', schedule: {periods: [{no: 1, subject: '班会'}, {no: 2, subject: '体育'}]}},
-    priority: 5,
-    status: '待生效'
+// ============================================================
+// 条目工厂与解析
+// ============================================================
+
+export function createCondition(kind = ConditionKind.DATE) {
+  const base = { kind }
+  if (kind === ConditionKind.DATE) base.date = null
+  if (kind === ConditionKind.RANGE) { base.startDate = null; base.endDate = null }
+  if (kind === ConditionKind.WEEKLY) { base.everyWeeks = 2; base.weekOffset = 0 }
+  if (kind === ConditionKind.EVENT) { base.event = EventKind.CLASS_START; base.period = 1 }
+  if (kind === ConditionKind.CRON) { base.cron = '0 8 * * 1'; base.duration = 0 }
+  return base
+}
+
+export function createAction(type) {
+  if (type === AutorunType.COMPENSATION) return { useDate: null }
+  if (type === AutorunType.TIMETABLE) return { timetableId: '' }
+  if (type === AutorunType.SCHEDULE) return { schedule: { periods: [] } }
+  if (type === AutorunType.ALL) return { timetableId: '', schedule: { periods: [] } }
+  if (type === AutorunType.CLIENT_CONFIG) {
+    // 空对象表示「不覆盖任何配置」；只有显式开关的键才会下发
+    return { settings: {} }
   }
-]
+  return {}
+}
+
+export function createEntry(type) {
+  return { id: '', enabled: true, note: '', when: createCondition(ConditionKind.DATE), action: createAction(type) }
+}
+
+// 服务端返回的条目 -> 编辑器条目（补齐缺省字段）
+export function normalizeEntry(raw, type) {
+  const entry = createEntry(type)
+  if (!raw || typeof raw !== 'object') return entry
+  entry.id = String(raw.id || '')
+  entry.enabled = raw.enabled !== false
+  entry.note = String(raw.note || '')
+  if (raw.when && typeof raw.when === 'object') {
+    entry.when = {...createCondition(raw.when.kind || ConditionKind.DATE), ...raw.when}
+    if (!Array.isArray(entry.when.weekdays)) delete entry.when.weekdays
+  }
+  const action = raw.action || raw.content || {}
+  entry.action = {...createAction(type), ...action}
+  if (type === AutorunType.SCHEDULE || type === AutorunType.ALL) {
+    const periods = action?.schedule?.periods
+    entry.action.schedule = {
+      periods: Array.isArray(periods)
+          ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
+          : []
+    }
+  }
+  if (type === AutorunType.CLIENT_CONFIG) {
+    const settings = {}
+    for (const opt of clientConfigSettingOptions) {
+      const value = action?.settings?.[opt.key]
+      if (typeof value === 'boolean') settings[opt.key] = value
+    }
+    entry.action.settings = settings
+  }
+  return entry
+}
+
+export function describeCondition(when) {
+  if (!when) return '始终生效'
+  switch (when.kind) {
+    case ConditionKind.DATE:
+      return `单日 ${when.date || '?'}`
+    case ConditionKind.RANGE:
+      return `${when.startDate || '?'} 至 ${when.endDate || '?'}`
+    case ConditionKind.WEEKLY: {
+      const every = Number(when.everyWeeks) || 1
+      const offset = Number(when.weekOffset) || 0
+      const parts = [`每 ${every} 周的第 ${offset + 1} 周`]
+      if (when.startDate || when.endDate) parts.push(`${when.startDate || '开学'} ~ ${when.endDate || '不限'}`)
+      if (Array.isArray(when.weekdays) && when.weekdays.length > 0) {
+        parts.push(when.weekdays.map(d => weekdayOptions.find(o => o.value === d)?.label || d).join('/'))
+      }
+      return parts.join('，')
+    }
+    case ConditionKind.EVENT: {
+      const label = eventKindOptions.find(o => o.value === when.event)?.label || when.event || '?'
+      if (when.event === EventKind.STARTUP) return label
+      return label.replace('N', String(Number(when.period) || 1))
+    }
+    case ConditionKind.CRON:
+      return when.duration > 0 ? `cron ${when.cron}（持续 ${when.duration} 分钟）` : `cron ${when.cron}`
+    default:
+      return String(when.kind || '未知条件')
+  }
+}
+
+export function describeEntry(task, entry) {
+  const type = decodeAutorunType(task?.type)
+  const action = entry?.action || {}
+  if (type === AutorunType.COMPENSATION) return `上 ${action.useDate || '?'} 的课`
+  if (type === AutorunType.TIMETABLE) return `作息表：${action.timetableId || '?'}`
+  if (type === AutorunType.SCHEDULE) return `课程表（${(action.schedule?.periods || []).length} 节）`
+  if (type === AutorunType.ALL) return `作息表：${action.timetableId || '?'} + 课程表（${(action.schedule?.periods || []).length} 节）`
+  if (type === AutorunType.CLIENT_CONFIG) {
+    const on = clientConfigSettingOptions.filter(o => action.settings?.[o.key] === true).map(o => o.label)
+    const off = clientConfigSettingOptions.filter(o => action.settings?.[o.key] === false).map(o => `关闭${o.label}`)
+    return [...on, ...off].join('、') || '未配置'
+  }
+  return ''
+}
+
+export function summarizeEntries(task) {
+  const entries = Array.isArray(task?.entries) ? task.entries : []
+  if (entries.length === 0) return '（无条目）'
+  const first = entries[0]
+  const head = `${describeCondition(first.when)} · ${describeEntry(task, first)}`
+  return entries.length > 1 ? `${head} 等 ${entries.length} 条` : head
+}
+
+// ============================================================
+// 接口调用
+// ============================================================
+
+function mapTask(t) {
+  let scope = []
+  if (Array.isArray(t.scope)) scope = t.scope
+  else if (t.scope) scope = [t.scope]
+  return {
+    id: t.id,
+    name: t.name || '',
+    type: decodeAutorunType(t.type),
+    scope,
+    priority: Number(t.priority) || 0,
+    enabled: t.enabled !== false,
+    status: t.status || '待生效',
+    entries: Array.isArray(t.entries) ? t.entries : []
+  }
+}
 
 export async function listTasks() {
   const resp = await axios.get(`${APISRV}/web/autorun`)
   const payload = resp?.data
   const arr = Array.isArray(payload?.data) ? payload.data : []
-  const data = arr.map((t) => {
-    const id = t.id
-    let scope = []
-    if (Array.isArray(t.scope)) scope = t.scope
-    else if (t.scope) scope = [t.scope]
-    return {
-      id,
-      type: t.type, // 列表页渲染已兼容字符串或数字
-      scope,
-      content: t.content || {},
-      priority: Number(t.priority) || 0,
-      status: t.status || '待生效'
-    }
-  })
-  return { data }
+  return { data: arr.map(mapTask) }
 }
 
 export async function getTask(id) {
-  try {
-    const resp = await axios.get(`${APISRV}/web/autorun/hash/${id}`)
-    const d = resp?.data?.data || resp?.data
-    if (!d) throw new Error('Empty')
-    const scope = [d.scope].flat().filter(Boolean)
-    const type = decodeAutorunType(d.type)
-    const content = d.content || {}
-    return {
-      data: {
-        id: d.id || id,
-        type,
-        scope,
-        content,
-        priority: Number(d.priority) || 0,
-        status: d.status || '待生效'
-      }
-    }
-  } catch (e) {
-    // SonarQube false positive: 内层 catch 仅用于回退到内置存储，外层错误在上层处理
-    try {
-      await delay()
-      const found = store.find(t => t.id === id)
-      if (!found) {
-        const error = new Error('Not Found')
-        error.status = 404
-        throw error
-      }
-      return {data: structuredClone(found)}
-    } catch {
-      throw e
-    }
-  }
+  const resp = await axios.get(`${APISRV}/web/autorun/hash/${id}`)
+  const d = resp?.data?.data
+  if (!d || Array.isArray(d)) throw new Error('Not Found')
+  return { data: mapTask(d) }
 }
 
-export async function saveAutorun(payload, password){
-  if (payload?.type === AutorunType.COMPENSATION){
-    const resp = await axios.put(`${APISRV}/web/autorun/compensation`, payload, {
-      headers: { 'X-Verify-Password': password }
-    })
-    return resp?.data
-  }
-  if (payload?.type === AutorunType.TIMETABLE) {
-    const resp = await axios.put(`${APISRV}/web/autorun/timetable`, payload, {
-      headers: { 'X-Verify-Password': password }
-    })
-    return resp?.data
-  }
-  if (payload?.type === AutorunType.SCHEDULE) {
-    const resp = await axios.put(`${APISRV}/web/autorun/schedule`, payload, {
-      headers: { 'X-Verify-Password': password }
-    })
-    return resp?.data
-  }
-  if (payload?.type === AutorunType.ALL) {
-    const resp = await axios.put(`${APISRV}/web/autorun/all`, payload, {
-      headers: { 'X-Verify-Password': password }
-    })
-    return resp?.data
-  }
-  return { skipped: true }
-}
-
-function normalizeType(t) {
-  if (typeof t === 'number') {
-    if (t === AutorunType.COMPENSATION) return 'COMPENSATION'
-    if (t === AutorunType.TIMETABLE) return 'TIMETABLE'
-    if (t === AutorunType.SCHEDULE) return 'SCHEDULE'
-    if (t === AutorunType.ALL) return 'ALL'
-  }
-  return String(t)
-}
-
-export function summarizeContent(task) {
-  if (!task) return ''
-  const tt = normalizeType(task.type)
-  const c = task.content || {}
-  if (tt === 'COMPENSATION') return `${c.date || '?'} 上 ${c.useDate || '?'} 的课`
-  if (tt === 'TIMETABLE') return `${c.date || '?'} 使用作息表：${getTimetableLabel(c.timetableId || '?')}`
-  if (tt === 'SCHEDULE') return `为 ${c.date || '?'} 设置课程表（班级/范围见生效域）`
-  if (tt === 'ALL') return `为 ${c.date || '?'} 设置课程表`
-  return ''
+// saveTask 统一任务写入：一个任务携带若干条目
+export async function saveTask(payload, password) {
+  const resp = await axios.put(`${APISRV}/web/autorun/task`, payload, {
+    headers: { 'X-Verify-Password': password }
+  })
+  return resp?.data
 }
 
 export async function fetchClassScheduleTemplateByWeekday({ school, grade, cls, weekday }) {
@@ -281,7 +335,8 @@ export async function fetchClassScheduleTemplateByWeekday({ school, grade, cls, 
     return {data: {periods, timetableLabel}}
   } catch (e) {
     console.warn('[autorun] fetchClassScheduleTemplateByWeekday fallback', e)
-    return {data: {periods: [], timetableLabel: ''}}
+    // failed 标记用于让调用方区分「请求失败」与「当天确实没有课」，避免用空模板覆盖已填内容
+    return {data: {periods: [], timetableLabel: '', failed: true}}
   }
 }
 
@@ -331,8 +386,4 @@ export async function fetchCompYearPairs(year) {
     console.warn('[autorun] fetchCompYearPairs error', e)
     return { data: { year, pairs: [] } }
   }
-}
-
-async function delay(ms = 150) {
-  await new Promise(r => setTimeout(r, ms))
 }

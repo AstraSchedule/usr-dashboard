@@ -332,10 +332,11 @@ async function fetchGradeOptions(pair) {
   }
 }
 
-// 多年级（TIMETABLE）取作息表交集，避免选出对部分生效域不可用的作息表；交集计算失败回退单年级选项
-async function resolveTimetableOptions(options) {
-  if (form.type !== AutorunType.TIMETABLE) return options
-  const pairs = parseGradePairsFromScopes(form.scope)
+// 多年级（TIMETABLE）取作息表交集，避免选出对部分生效域不可用的作息表；交集计算失败回退单年级选项。
+// type/scope 由调用方在发起加载时捕获传入，避免 await 期间读到已经变化的表单状态。
+async function resolveTimetableOptions(type, scope, options) {
+  if (type !== AutorunType.TIMETABLE) return options
+  const pairs = parseGradePairsFromScopes(scope)
   if (pairs.length <= 1) return options
   try {
     return intersectTimetableOptions(await Promise.all(pairs.map(p => fetchTimetableOptions(p.school, p.grade))))
@@ -346,35 +347,46 @@ async function resolveTimetableOptions(options) {
 }
 
 // ALL 类型的新条目补一个默认作息表
-function applyDefaultTimetableToEntries() {
-  if (form.type !== AutorunType.ALL || timetableOpts.value.length === 0) return
+function applyDefaultTimetableToEntries(type) {
+  if (type !== AutorunType.ALL || timetableOpts.value.length === 0) return
   for (const entry of form.entries) {
     if (!entry.action.timetableId) entry.action.timetableId = timetableOpts.value[0].value
   }
 }
 
+// 类型监听、作用域监听与 applyTask 都可能触发加载：用序号丢弃被取代的旧加载，
+// 否则旧请求返回后会覆盖新作用域的选项、写入旧作用域的默认作息表，甚至弹出过期警告。
+let gradeOptionsSeq = 0
+
 async function loadGradeOptions() {
   if (form.type === AutorunType.COMPENSATION) return
-  const pair = pickSchoolGrade(form.scope)
+  const seq = ++gradeOptionsSeq
+  const type = form.type
+  const scope = form.scope.slice()
+  const pair = pickSchoolGrade(scope)
   if (!pair) {
-    clearGradeOptions()
+    if (seq === gradeOptionsSeq) clearGradeOptions()
     return
   }
   let fetched
   try {
     fetched = await fetchGradeOptions(pair)
   } catch (e) {
+    if (seq !== gradeOptionsSeq) return
     // 选项拉取失败不应该让编辑器崩掉：清空选项并提示，用户改生效域后可重试
     console.warn('[autorun] 作息表/科目选项获取失败', e)
     message.warning('作息表与科目选项获取失败，请检查网络或稍后重试')
     clearGradeOptions()
     return
   }
+  if (seq !== gradeOptionsSeq) return
   // needMap 正常由接口返回；缺失时按选项的 need 现场兜底，保持与旧行为一致
   needByLabelMap.value = fetched.needMap || new Map(fetched.options.map(o => [o.label, Number(o.need) || 0]))
   subjectsOpts.value = fetched.subjects
-  timetableOpts.value = await resolveTimetableOptions(fetched.options)
-  applyDefaultTimetableToEntries()
+  const options = await resolveTimetableOptions(type, scope, fetched.options)
+  if (seq !== gradeOptionsSeq) return
+  timetableOpts.value = options
+  applyDefaultTimetableToEntries(type)
 }
 
 watch(() => [form.type, JSON.stringify(form.scope)], () => {

@@ -1,0 +1,11 @@
+{
+  // ESA Pages（阿里云「函数和 Pages」）项目配置：存在该文件时它即项目构建与静态托管的唯一配置来源
+  "name": "usr-dashboard",
+  "installCommand": "bun install",
+  "buildCommand": "bun run build",
+  "assets": {
+    "directory": "./dist",
+    // 未匹配到静态资源时回退到 index.html（200），前端 history 路由刷新不再 404
+    "notFoundStrategy": "singlePageApplication"
+  }
+}

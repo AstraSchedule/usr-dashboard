@@ -6,6 +6,7 @@ import {useRequest} from 'vue-request'
 import {login} from '@/api/auth.js'
 import {setToken, setUserInfo} from '@/auth.js'
 import {getServer, setServer} from '@/global.js'
+import IcpFiling from '@/components/IcpFiling.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -75,16 +76,21 @@ function windowOpen(url) {
         <n-button block :disabled="loading" @click="windowOpen('https://go.getastra.cn')">注册</n-button>
       </n-space>
     </n-card>
+    <IcpFiling class="login-icp" />
   </div>
 </template>
 
 <style scoped>
 .login-wrapper {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   min-height: 100vh;
   background: #f5f5f5;
+}
+.login-icp {
+  margin-top: 16px;
 }
 .login-wrapper.dark {
   background: #18181c;

@@ -7,8 +7,8 @@
           <router-view></router-view>
         </template>
         <!-- 已登录：渲染侧栏布局 -->
-        <div v-else class="app-shell">
-          <n-layout has-sider class="app-shell-body">
+        <n-space v-else vertical class="full">
+          <n-layout has-sider style="height: 100vh">
             <n-layout-sider
               bordered
               collapse-mode="width"
@@ -62,10 +62,10 @@
                 </template>
               </n-alert>
               <router-view></router-view>
+              <IcpFiling />
             </n-layout>
           </n-layout>
-          <IcpFiling />
-        </div>
+        </n-space>
       </n-dialog-provider>
     </n-message-provider>
 
@@ -487,17 +487,6 @@ function handleLogout() {
 </script>
 
 <style scoped>
-.app-shell {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-}
-
-.app-shell-body {
-    flex: 1 1 auto;
-    min-height: 0;
-}
-
 .sider-logo {
     display: flex;
     align-items: center;

@@ -7,8 +7,8 @@
           <router-view></router-view>
         </template>
         <!-- 已登录：渲染侧栏布局 -->
-        <n-space v-else vertical class="full">
-          <n-layout has-sider style="height: 100vh">
+        <div v-else class="app-shell">
+          <n-layout has-sider class="app-shell-body">
             <n-layout-sider
               bordered
               collapse-mode="width"
@@ -64,7 +64,8 @@
               <router-view></router-view>
             </n-layout>
           </n-layout>
-        </n-space>
+          <IcpFiling />
+        </div>
       </n-dialog-provider>
     </n-message-provider>
 
@@ -127,6 +128,7 @@ import axios from "axios";
 import {getAPISRV} from "@/global.js";
 import {getToken, removeToken, isLoggedIn, getUserInfo, setUserInfo, removeUserInfo} from "@/auth.js";
 import hljs from 'highlight.js/lib/core'
+import IcpFiling from '@/components/IcpFiling.vue'
 
 const router = useRouter()
 
@@ -485,6 +487,17 @@ function handleLogout() {
 </script>
 
 <style scoped>
+.app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.app-shell-body {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .sider-logo {
     display: flex;
     align-items: center;

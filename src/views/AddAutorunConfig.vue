@@ -169,6 +169,8 @@ function rotationToEntries() {
   for (let i = 0; i < rotationRows.value.length; i++) {
     out.push({
       id: '',
+      // 与列表视图一致：条目必须有稳定 key，异步请求返回才能按 key 重新定位
+      _key: nextEntryKey(),
       enabled: true,
       note: '',
       when: {kind: ConditionKind.WEEKLY, everyWeeks: rotationRows.value.length, weekOffset: i},
@@ -236,10 +238,13 @@ const detectedTimetableLabel = computed(() => {
 })
 const isRestDay = computed(() => detectedNeedRaw.value !== null && toCount(detectedNeedRaw.value) === 0)
 
+// /web/config/:school/:grade/timetable/options 返回的 need 已经是「节次数」（max(下标)+1，见
+// router/web/config_handlers.go 的 GetTimetableOptions），这里不能再 +1，否则界面上显示的
+// 节次数会比实际多一节、自动填充后多出的一行取不到科目（#62）。
 function toCount(rawNeed) {
   const n = Number(rawNeed)
   if (!Number.isFinite(n)) return 0
-  return n < 0 ? 0 : n + 1
+  return n < 0 ? 0 : n
 }
 
 function pickSchoolGrade(selected) {
@@ -311,36 +316,85 @@ function intersectTimetableOptions(results) {
   return [...(intersect || new Set())].map(v => ({label: labelMap.get(v) || String(v), value: v}))
 }
 
-async function loadGradeOptions() {
-  if (form.type === AutorunType.COMPENSATION) return
-  const pair = pickSchoolGrade(form.scope)
-  if (!pair) {
-    timetableOpts.value = []
-    subjectsOpts.value = []
-    needByLabelMap.value = new Map()
-    return
-  }
-  const [{options, needMap: labelNeedMap}, {options: subs}] = await Promise.all([
+function clearGradeOptions() {
+  timetableOpts.value = []
+  subjectsOpts.value = []
+  needByLabelMap.value = new Map()
+}
+
+// 拉取该年级的作息表选项、need 映射与科目选项；失败抛出由调用方处理
+async function fetchGradeOptions(pair) {
+  const [timetableResult, subjectResult] = await Promise.all([
     fetchTimetableOptions(pair.school, pair.grade),
     fetchSubjectsOptions(pair.school, pair.grade)
   ])
-  needByLabelMap.value = labelNeedMap instanceof Map ? labelNeedMap : new Map(options.map(o => [o.label, Number(o.need) || 0]))
-  subjectsOpts.value = subs
+  return {
+    options: Array.isArray(timetableResult?.options) ? timetableResult.options : [],
+    needMap: timetableResult?.needMap instanceof Map && timetableResult.needMap.size > 0 ? timetableResult.needMap : null,
+    subjects: Array.isArray(subjectResult?.options) ? subjectResult.options : []
+  }
+}
 
-  if (form.type === AutorunType.TIMETABLE) {
-    // 多年级时取交集，避免选出对部分生效域不可用的作息表
-    const pairs = parseGradePairsFromScopes(form.scope)
-    timetableOpts.value = pairs.length > 1
-        ? intersectTimetableOptions(await Promise.all(pairs.map(p => fetchTimetableOptions(p.school, p.grade))))
-        : options
-  } else {
-    timetableOpts.value = options
+// 多年级（TIMETABLE）取作息表交集，避免选出对部分生效域不可用的作息表；交集计算失败回退单年级选项。
+// type/scope 由调用方在发起加载时捕获传入，避免 await 期间读到已经变化的表单状态。
+async function resolveTimetableOptions(type, scope, options) {
+  if (type !== AutorunType.TIMETABLE) return options
+  const pairs = parseGradePairsFromScopes(scope)
+  if (pairs.length <= 1) return options
+  try {
+    return intersectTimetableOptions(await Promise.all(pairs.map(p => fetchTimetableOptions(p.school, p.grade))))
+  } catch (e) {
+    console.warn('[autorun] 作息表交集计算失败', e)
+    return options
   }
-  if (form.type === AutorunType.ALL) {
-    for (const entry of form.entries) {
-      if (!entry.action.timetableId && timetableOpts.value.length > 0) entry.action.timetableId = timetableOpts.value[0].value
-    }
+}
+
+// ALL 类型的新条目补一个默认作息表
+function applyDefaultTimetableToEntries(type) {
+  if (type !== AutorunType.ALL || timetableOpts.value.length === 0) return
+  for (const entry of form.entries) {
+    if (!entry.action.timetableId) entry.action.timetableId = timetableOpts.value[0].value
   }
+}
+
+// 类型监听、作用域监听与 applyTask 都可能触发加载：用序号丢弃被取代的旧加载，
+// 否则旧请求返回后会覆盖新作用域的选项、写入旧作用域的默认作息表，甚至弹出过期警告。
+let gradeOptionsSeq = 0
+
+async function loadGradeOptions() {
+  // 先递增序号再分支：切到调休时同样要让在途的旧请求失效，
+  // 否则旧请求仍可能写入选项、弹出过期警告或给调休条目塞作息表。
+  const seq = ++gradeOptionsSeq
+  const type = form.type
+  const scope = form.scope.slice()
+  if (type === AutorunType.COMPENSATION) {
+    clearGradeOptions()
+    return
+  }
+  const pair = pickSchoolGrade(scope)
+  if (!pair) {
+    if (seq === gradeOptionsSeq) clearGradeOptions()
+    return
+  }
+  let fetched
+  try {
+    fetched = await fetchGradeOptions(pair)
+  } catch (e) {
+    if (seq !== gradeOptionsSeq) return
+    // 选项拉取失败不应该让编辑器崩掉：清空选项并提示，用户改生效域后可重试
+    console.warn('[autorun] 作息表/科目选项获取失败', e)
+    message.warning('作息表与科目选项获取失败，请检查网络或稍后重试')
+    clearGradeOptions()
+    return
+  }
+  if (seq !== gradeOptionsSeq) return
+  // needMap 正常由接口返回；缺失时按选项的 need 现场兜底，保持与旧行为一致
+  needByLabelMap.value = fetched.needMap || new Map(fetched.options.map(o => [o.label, Number(o.need) || 0]))
+  subjectsOpts.value = fetched.subjects
+  const options = await resolveTimetableOptions(type, scope, fetched.options)
+  if (seq !== gradeOptionsSeq) return
+  timetableOpts.value = options
+  applyDefaultTimetableToEntries(type)
 }
 
 watch(() => [form.type, JSON.stringify(form.scope)], () => {
@@ -743,7 +797,7 @@ async function confirmSave(pwd) {
       </template>
 
       <template v-else>
-        <n-card v-for="(entry, idx) in form.entries" :key="idx" size="small" style="margin-bottom:12px" :bordered="true">
+        <n-card v-for="(entry, idx) in form.entries" :key="entry._key" size="small" style="margin-bottom:12px" :bordered="true">
           <template #header>
             <n-space align="center">
               <n-tag size="small" :bordered="false">第 {{ idx + 1 }} 条</n-tag>

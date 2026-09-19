@@ -3,7 +3,7 @@
 // 组件不直接修改 modelValue，统一通过 update:modelValue 回传新对象（SonarQube S8951）。
 import { computed } from 'vue'
 import { NButton, NCard, NDatePicker, NFormItem, NSelect, NSpace, NText } from 'naive-ui'
-import { AutorunType, clientConfigSettingOptions } from '@/api/autorun.js'
+import { AutorunType, clientConfigSettingOptions, normalizeSwap } from '@/api/autorun.js'
 
 const props = defineProps({
   type: { type: Number, required: true },
@@ -12,7 +12,9 @@ const props = defineProps({
   timetableLoading: { type: Boolean, default: false },
   timetableHint: { type: String, default: '' },
   subjectOptions: { type: Array, default: () => [] },
-  autoFilling: { type: Boolean, default: false }
+  autoFilling: { type: Boolean, default: false },
+  // 节次下拉的可选数量：由调用方按生效域的作息表节次数给出，缺省 12
+  periodCount: { type: Number, default: 12 }
 })
 const emit = defineEmits(['update:modelValue', 'auto-fill'])
 
@@ -33,6 +35,19 @@ function setUseDate(value) {
 
 function setTimetableId(value) {
   patch({ timetableId: value })
+}
+
+// 调课：两端各是 日期 + 节次，只改对应的一端后整体回传
+const swap = computed(() => normalizeSwap(props.modelValue?.swap))
+
+const periodOptions = computed(() => {
+  const n = Number(props.periodCount)
+  const count = Number.isFinite(n) && n >= 1 ? Math.floor(n) : 12
+  return Array.from({length: count}, (_, i) => ({label: `第 ${i + 1} 节`, value: i + 1}))
+})
+
+function setSwapSide(side, changes) {
+  patch({ swap: {...swap.value, [side]: {...swap.value[side], ...changes}} })
 }
 
 // 对象展开对 null/undefined 是安全的空操作，无需 `|| {}` 兜底
@@ -91,6 +106,30 @@ function onSettingChange(key, state) {
                   placeholder="先选择包含年级/班级的生效域后再选择作息表" @update:value="setTimetableId" />
       </n-form-item>
       <div v-if="timetableHint" style="font-size:12px;color:#888;">{{ timetableHint }}</div>
+    </template>
+
+    <template v-else-if="type === AutorunType.LESSON_SWAP">
+      <n-space vertical style="width:100%">
+        <n-form-item label="交换方" :show-feedback="false">
+          <n-space align="center">
+            <n-date-picker :formatted-value="swap.from.date" type="date" value-format="yyyy-MM-dd" clearable
+                           @update:formatted-value="v => setSwapSide('from', { date: v })" />
+            <n-select :value="swap.from.period" :options="periodOptions" style="width:130px"
+                      @update:value="v => setSwapSide('from', { period: v })" />
+          </n-space>
+        </n-form-item>
+        <n-form-item label="交换到" :show-feedback="false">
+          <n-space align="center">
+            <n-date-picker :formatted-value="swap.to.date" type="date" value-format="yyyy-MM-dd" clearable
+                           @update:formatted-value="v => setSwapSide('to', { date: v })" />
+            <n-select :value="swap.to.period" :options="periodOptions" style="width:130px"
+                      @update:value="v => setSwapSide('to', { period: v })" />
+          </n-space>
+        </n-form-item>
+      </n-space>
+      <n-text depth="3" style="font-size:12px;">
+        交换这两节课的科目，可跨天；生效条件由两端日期自动生成。
+      </n-text>
     </template>
 
     <template v-else-if="type === AutorunType.CLIENT_CONFIG">

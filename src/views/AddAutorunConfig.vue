@@ -121,6 +121,12 @@ function emptyAction() {
   return action
 }
 
+// Vue 的 reactive 对象是 Proxy，structuredClone 会直接抛 DataCloneError；
+// 条目内容本身都是纯 JSON 数据（日期是字符串、节次是数字），用 JSON 往返克隆即可
+function clonePlain(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
 function resetRotationRows(weeks) {
   const n = Math.max(1, Number(weeks) || 1)
   const next = []
@@ -141,7 +147,7 @@ function switchView(mode) {
       const seed = form.entries[0]?.action
       rotationRows.value = []
       resetRotationRows(rotationWeeks.value)
-      if (seed) rotationRows.value[0] = structuredClone(seed)
+      if (seed) rotationRows.value[0] = clonePlain(seed)
       message.info('当前条目不是单一的每周轮换，轮换表保存时会展开为 ' + rotationRows.value.length + ' 条每周轮换条目')
     }
   } else {
@@ -215,7 +221,7 @@ function addEntry() {
 }
 
 function duplicateEntry(index) {
-  const copy = structuredClone(form.entries[index])
+  const copy = clonePlain(form.entries[index])
   copy.id = ''
   copy._key = nextEntryKey()
   form.entries.splice(index + 1, 0, copy)

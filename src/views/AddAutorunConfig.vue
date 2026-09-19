@@ -362,10 +362,15 @@ function applyDefaultTimetableToEntries(type) {
 let gradeOptionsSeq = 0
 
 async function loadGradeOptions() {
-  if (form.type === AutorunType.COMPENSATION) return
+  // 先递增序号再分支：切到调休时同样要让在途的旧请求失效，
+  // 否则旧请求仍可能写入选项、弹出过期警告或给调休条目塞作息表。
   const seq = ++gradeOptionsSeq
   const type = form.type
   const scope = form.scope.slice()
+  if (type === AutorunType.COMPENSATION) {
+    clearGradeOptions()
+    return
+  }
   const pair = pickSchoolGrade(scope)
   if (!pair) {
     if (seq === gradeOptionsSeq) clearGradeOptions()

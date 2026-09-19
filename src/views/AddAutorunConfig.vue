@@ -24,6 +24,7 @@ import {
   AutorunType,
   ConditionKind,
   autorunTypeOptions,
+  buildSwapCondition,
   createAction,
   createEntry,
   describeCondition,
@@ -35,8 +36,10 @@ import {
   fetchSubjectsOptions,
   fetchTimetableOptions,
   flattenScope,
+  formatSwapDateRange,
   getTask,
   normalizeEntry,
+  normalizeSwap,
   saveTask
 } from '@/api/autorun.js'
 import {
@@ -105,7 +108,9 @@ const rotationWeeks = ref(2)
 const rotationRows = ref([])
 // 轮换表的课程模板取自「单日」的课程表，这里指定用哪一天取模板
 const rotationTemplateDate = ref(null)
-const rotationAvailable = computed(() => form.type !== AutorunType.COMPENSATION)
+// 轮换表把条目聚合成「每 N 周的第 X 周」，只对可周期化的类型有意义
+const rotationAvailable = computed(() =>
+  form.type !== AutorunType.COMPENSATION && form.type !== AutorunType.LESSON_SWAP)
 
 function emptyAction() {
   const action = createAction(form.type)
@@ -191,8 +196,12 @@ watch(() => form.type, (type, oldType) => {
   form.entries = [makeEntry(type)]
   // 类型变了，轮换表里的内容结构也变了，必须丢弃旧行
   rotationRows.value = []
-  resetRotationRows(rotationWeeks.value)
-  if (viewMode.value === 'rotation' && type === AutorunType.COMPENSATION) viewMode.value = 'list'
+  if (rotationAvailable.value) {
+    resetRotationRows(rotationWeeks.value)
+  } else {
+    // 不支持轮换表的类型：强制回到列表视图，不留任何轮换数据
+    viewMode.value = 'list'
+  }
   detectedNeedRaw.value = null
   detectedTimetableId.value = ''
   loadGradeOptions()
@@ -224,6 +233,11 @@ function onConditionChange(index, value) {
   form.entries[index].when = value
 }
 
+// 调课条目卡片里的只读提示：生效条件由两端日期自动生成
+function swapDateHint(entry) {
+  return formatSwapDateRange(entry?.action?.swap) || '待填写两端日期'
+}
+
 // ============================================================
 // 作用域 → 作息表 / 科目选项
 // ============================================================
@@ -246,6 +260,17 @@ function toCount(rawNeed) {
   if (!Number.isFinite(n)) return 0
   return n < 0 ? 0 : n
 }
+
+// 调课节次下拉的范围：优先用该作用域作息表的节次数（options.need 即所需课节行数），
+// 拿不到时回退 12。不发新请求，只复用 loadGradeOptions 已取到的数据
+const swapPeriodCount = computed(() => {
+  const detected = Number(detectedNeedRaw.value)
+  if (Number.isFinite(detected) && detected >= 1) return Math.floor(detected)
+  const counts = timetableOpts.value
+      .map(o => Number(needByLabelMap.value.get(o.label) ?? o.need))
+      .filter(n => Number.isFinite(n) && n >= 1)
+  return counts.length > 0 ? Math.max(...counts) : 12
+})
 
 function pickSchoolGrade(selected) {
   const arr = Array.isArray(selected) ? selected : []
@@ -362,10 +387,15 @@ function applyDefaultTimetableToEntries(type) {
 let gradeOptionsSeq = 0
 
 async function loadGradeOptions() {
-  if (form.type === AutorunType.COMPENSATION) return
+  // 先递增序号再分支：切到调休时同样要让在途的旧请求失效，
+  // 否则旧请求仍可能写入选项、弹出过期警告或给调休条目塞作息表。
   const seq = ++gradeOptionsSeq
   const type = form.type
   const scope = form.scope.slice()
+  if (type === AutorunType.COMPENSATION) {
+    clearGradeOptions()
+    return
+  }
   const pair = pickSchoolGrade(scope)
   if (!pair) {
     if (seq === gradeOptionsSeq) clearGradeOptions()
@@ -608,6 +638,10 @@ function cleanAction(action) {
   if (form.type === AutorunType.TIMETABLE) return {timetableId: action.timetableId}
   if (form.type === AutorunType.SCHEDULE) return {schedule: {periods: action.schedule?.periods || []}}
   if (form.type === AutorunType.ALL) return {timetableId: action.timetableId, schedule: {periods: action.schedule?.periods || []}}
+  if (form.type === AutorunType.LESSON_SWAP) {
+    const {from, to} = normalizeSwap(action?.swap)
+    return {swap: {from, to}}
+  }
   if (form.type === AutorunType.CLIENT_CONFIG) return {settings: {...action.settings}}
   return {}
 }
@@ -641,11 +675,20 @@ function validateAllAction(action) {
   return action.timetableId ? validatePeriods(action) : '请选择作息表'
 }
 
+function validateSwapAction(action) {
+  const {from, to} = normalizeSwap(action?.swap)
+  if (!from.date || !to.date) return '请选择交换的两端日期'
+  if (from.period < 1 || to.period < 1) return '节次必须从 1 开始'
+  if (from.date === to.date && from.period === to.period) return '同一天内交换的两节课不能是同一节'
+  return ''
+}
+
 const actionValidators = {
   [AutorunType.COMPENSATION]: (action) => (action.useDate ? '' : '请选择借用的上课日期'),
   [AutorunType.TIMETABLE]: validateTimetableAction,
   [AutorunType.ALL]: validateAllAction,
   [AutorunType.SCHEDULE]: validatePeriods,
+  [AutorunType.LESSON_SWAP]: validateSwapAction,
   [AutorunType.CLIENT_CONFIG]: validateClientSettings
 }
 
@@ -658,8 +701,10 @@ function validate() {
   if (!Array.isArray(form.scope) || form.scope.length === 0) { message.warning('请选择生效域'); return false }
   const entries = currentEntries()
   if (entries.length === 0) { message.warning('请至少添加一条条目'); return false }
+  // 调课的条件由两端日期自动生成，没有需要用户填写的条件
+  const needCondition = form.type !== AutorunType.LESSON_SWAP
   for (let i = 0; i < entries.length; i++) {
-    const detail = validateCondition(entries[i].when) || validateAction(entries[i].action)
+    const detail = (needCondition ? validateCondition(entries[i].when) : '') || validateAction(entries[i].action)
     if (detail) { message.warning('第 ' + (i + 1) + ' 条：' + detail); return false }
   }
   return true
@@ -680,7 +725,10 @@ async function confirmSave(pwd) {
       id: e.id || undefined,
       enabled: e.enabled !== false,
       note: e.note || undefined,
-      when: cleanCondition(e.when),
+      // 调课：条件随两端日期自动生成，覆盖 from/to 所在的两天
+      when: form.type === AutorunType.LESSON_SWAP
+          ? cleanCondition(buildSwapCondition(e.action?.swap))
+          : cleanCondition(e.when),
       action: cleanAction(e.action)
     }))
     const payload = {
@@ -784,6 +832,7 @@ async function confirmSave(pwd) {
                 :timetable-hint="''"
                 :subject-options="subjectsOpts"
                 :auto-filling="scheduleAutoFilling"
+                :period-count="swapPeriodCount"
                 @update:model-value="v => rotationRows[idx] = v"
                 @auto-fill="autoFillSchedule({ when: { kind: ConditionKind.DATE, date: rotationTemplateDate }, action: row }, idx)"
             />
@@ -796,7 +845,8 @@ async function confirmSave(pwd) {
           <template #header>
             <n-space align="center">
               <n-tag size="small" :bordered="false">第 {{ idx + 1 }} 条</n-tag>
-              <n-text depth="3" style="font-size:12px;">{{ describeCondition(entry.when) }} · {{ describeEntry(form, entry) }}</n-text>
+              <n-text v-if="form.type === AutorunType.LESSON_SWAP" depth="3" style="font-size:12px;">{{ describeEntry(form, entry) }}</n-text>
+              <n-text v-else depth="3" style="font-size:12px;">{{ describeCondition(entry.when) }} · {{ describeEntry(form, entry) }}</n-text>
             </n-space>
           </template>
           <template #header-extra>
@@ -808,7 +858,10 @@ async function confirmSave(pwd) {
           </template>
 
           <n-space vertical style="width:100%">
-            <n-form-item label="生效条件" :show-feedback="false">
+            <n-form-item v-if="form.type === AutorunType.LESSON_SWAP" label="生效条件" :show-feedback="false">
+              <n-text depth="3" style="font-size:12px;">生效日期：{{ swapDateHint(entry) }}（自动）</n-text>
+            </n-form-item>
+            <n-form-item v-else label="生效条件" :show-feedback="false">
               <condition-editor :model-value="entry.when" :type="form.type" @update:model-value="v => onConditionChange(idx, v)" />
             </n-form-item>
 
@@ -821,6 +874,7 @@ async function confirmSave(pwd) {
                   :timetable-hint="''"
                   :subject-options="subjectsOpts"
                   :auto-filling="scheduleAutoFilling"
+                  :period-count="swapPeriodCount"
                   @update:model-value="v => form.entries[idx].action = v"
                   @auto-fill="autoFillSchedule(entry)"
               />

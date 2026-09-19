@@ -238,10 +238,13 @@ const detectedTimetableLabel = computed(() => {
 })
 const isRestDay = computed(() => detectedNeedRaw.value !== null && toCount(detectedNeedRaw.value) === 0)
 
+// /web/config/:school/:grade/timetable/options 返回的 need 已经是「节次数」（max(下标)+1，见
+// router/web/config_handlers.go 的 GetTimetableOptions），这里不能再 +1，否则界面上显示的
+// 节次数会比实际多一节、自动填充后多出的一行取不到科目（#62）。
 function toCount(rawNeed) {
   const n = Number(rawNeed)
   if (!Number.isFinite(n)) return 0
-  return n < 0 ? 0 : n + 1
+  return n < 0 ? 0 : n
 }
 
 function pickSchoolGrade(selected) {

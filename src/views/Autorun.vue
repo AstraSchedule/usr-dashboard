@@ -5,10 +5,10 @@ import {useRequest} from 'vue-request'
 import {useRouter} from 'vue-router'
 import axios from 'axios'
 import {getAPISRV} from '@/global.js'
-import {AutorunType, getAutorunTypeLabel, listTasks, summarizeContent} from '@/api/autorun.js'
+import {AutorunType, getAutorunTypeLabel, listTasks, summarizeEntries} from '@/api/autorun.js'
 import ScopeTags from '@/components/ScopeTags.vue'
 import ConfirmPasswordModal from '@/components/ConfirmPasswordModal.vue'
-import { verifyPassword, confirmAction } from '@/api/auth.js'
+import { confirmAction } from '@/api/auth.js'
 
 // 排序：生效中 > 待生效 > 已过期；生效中内部按优先级降序，其他保持原顺序
 function sortAutorunRows(list) {
@@ -46,13 +46,17 @@ const typeTypeMapNum = {
   [AutorunType.COMPENSATION]: 'warning',
   [AutorunType.TIMETABLE]: 'info',
   [AutorunType.SCHEDULE]: 'success',
-  [AutorunType.ALL]: 'default'
+  [AutorunType.ALL]: 'default',
+  [AutorunType.CLIENT_CONFIG]: 'primary'
 }
-const typeTypeMapStr = {'COMPENSATION': 'warning', 'TIMETABLE': 'info', 'SCHEDULE': 'success', 'ALL': 'default'}
+const typeTypeMapStr = {
+  'COMPENSATION': 'warning', 'TIMETABLE': 'info', 'SCHEDULE': 'success',
+  'ALL': 'default', 'CLIENT_CONFIG': 'primary'
+}
 
 function getTypeLabelFlexible(type) {
   if (typeof type === 'number') return getAutorunTypeLabel(type)
-  const map = {COMPENSATION: '调休', TIMETABLE: '作息表调整', SCHEDULE: '课程表调整', ALL: '全部调整'}
+  const map = {COMPENSATION: '调休', TIMETABLE: '作息表调整', SCHEDULE: '课程表调整', ALL: '全部调整', CLIENT_CONFIG: '客户端配置'}
   return map[type] || String(type)
 }
 
@@ -100,20 +104,35 @@ async function doDelete(password) {
   }
 }
 
+function renderName(row) {
+  return row.name
+      ? h('span', {}, row.name)
+      : h('span', {style: 'color:#888'}, '未命名任务')
+}
+
+function renderEntryCount(row) {
+  const n = Array.isArray(row.entries) ? row.entries.length : 1
+  return h(NTag, {size: 'small', bordered: false}, {default: () => `${n} 条`})
+}
+
+function renderStatus(row) {
+  if (row.enabled === false) {
+    return h(NTag, {type: 'default', size: 'small', bordered: false}, {default: () => '已停用'})
+  }
+  const type = statusTypeMap[row.status] || 'default';
+  return h(NTag, {type, size: 'small', bordered: false}, {default: () => row.status})
+}
+
 const columns = [
-  {title: '唯一ID', key: 'id', ellipsis: {tooltip: true}},
-  {title: '类型', key: 'type', render: (row) => renderType(row.type)},
+  {title: '名称', key: 'name', ellipsis: {tooltip: true}, render: (row) => renderName(row), width: 160},
+  {title: '类型', key: 'type', render: (row) => renderType(row.type), width: 130},
   {title: '生效域', key: 'scope', render: (row) => h(ScopeTags, {scopes: row.scope})},
-  { title: '内容', key: 'content', ellipsis: { tooltip: true }, render: (row) => summarizeContent(row) },
-  {title: '优先级', key: 'priority', align: 'center', render: (row) => renderPriorityTag(row.priority)},
+  {title: '内容', key: 'entries', ellipsis: {tooltip: true}, render: (row) => summarizeEntries(row)},
+  {title: '条目', key: 'entryCount', align: 'center', width: 80, render: (row) => renderEntryCount(row)},
+  {title: '优先级', key: 'priority', align: 'center', width: 90, render: (row) => renderPriorityTag(row.priority)},
+  {title: '状态', key: 'status', align: 'center', width: 100, render: (row) => renderStatus(row)},
   {
-    title: '状态', key: 'status', align: 'center', render: (row) => {
-      const type = statusTypeMap[row.status] || 'default';
-      return h(NTag, {type, size: 'small', bordered: false}, {default: () => row.status})
-    }
-  },
-  {
-    title: '快捷操作', key: 'actions', align: 'center', render: (row) => h(NSpace, {justify: 'center'}, {
+    title: '快捷操作', key: 'actions', align: 'center', width: 160, render: (row) => h(NSpace, {justify: 'center'}, {
       default: () => [
       h(NButton, { size: 'small', tertiary: true, onClick: () => onEdit(row) }, { default: () => '修改' }),
       h(NButton, { size: 'small', tertiary: true, type: 'error', onClick: () => askDelete(row) }, { default: () => '删除' })

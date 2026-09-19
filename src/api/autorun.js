@@ -2,7 +2,7 @@ import axios from 'axios'
 import {getAPISRV} from '@/global.js'
 
 // 自动任务 v2：一条记录 = 一个任务，任务内包含若干「条件 + 内容」条目
-// TaskItem: { id, name, type(0..4), scope: string[], priority(number), enabled(bool),
+// TaskItem: { id, name, type(0..5), scope: string[], priority(number), enabled(bool),
 //             status('待生效'|'生效中'|'已过期'), entries: EntryItem[] }
 // EntryItem: { id, enabled(bool), note, when: Condition|null, action: object }
 
@@ -11,13 +11,15 @@ export const AutorunType = {
   TIMETABLE: 1,
   SCHEDULE: 2,
   ALL: 3,
-  CLIENT_CONFIG: 4
+  CLIENT_CONFIG: 4,
+  LESSON_SWAP: 5
 }
 
 export const autorunTypeOptions = [
   { label: '调休', value: AutorunType.COMPENSATION },
   { label: '作息表调整', value: AutorunType.TIMETABLE },
   { label: '课程表调整', value: AutorunType.SCHEDULE },
+  { label: '调课', value: AutorunType.LESSON_SWAP },
   { label: '全部调整', value: AutorunType.ALL },
   { label: '客户端配置', value: AutorunType.CLIENT_CONFIG }
 ]
@@ -82,6 +84,7 @@ export function decodeAutorunType(t) {
   if (s === 'SCHEDULE') return AutorunType.SCHEDULE
   if (s === 'ALL') return AutorunType.ALL
   if (s === 'CLIENT_CONFIG') return AutorunType.CLIENT_CONFIG
+  if (s === 'LESSON_SWAP') return AutorunType.LESSON_SWAP
   return t
 }
 
@@ -183,11 +186,69 @@ export function createAction(type) {
   if (type === AutorunType.TIMETABLE) return { timetableId: '' }
   if (type === AutorunType.SCHEDULE) return { schedule: { periods: [] } }
   if (type === AutorunType.ALL) return { timetableId: '', schedule: { periods: [] } }
+  if (type === AutorunType.LESSON_SWAP) return createSwapAction()
   if (type === AutorunType.CLIENT_CONFIG) {
     // 空对象表示「不覆盖任何配置」；只有显式开关的键才会下发
     return { settings: {} }
   }
   return {}
+}
+
+// 调课（etype=5）：条目内容为「交换两节具体的课」，两端各是 本地日期 YYYY-MM-DD + 从 1 开始的节次
+export function createSwapSide() {
+  return { date: null, period: 1 }
+}
+
+export function createSwapAction() {
+  return { swap: { from: createSwapSide(), to: createSwapSide() } }
+}
+
+function normalizeSwapSide(raw) {
+  const side = createSwapSide()
+  if (!raw || typeof raw !== 'object') return side
+  // 日期是本地日期字符串（无时区），原样保留；节次统一按数字处理
+  side.date = raw.date ? String(raw.date) : null
+  const period = Number(raw.period)
+  side.period = Number.isFinite(period) && period >= 1 ? Math.floor(period) : 1
+  return side
+}
+
+export function normalizeSwap(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  return { from: normalizeSwapSide(source.from), to: normalizeSwapSide(source.to) }
+}
+
+// 调课条目的生效条件由两端日期自动生成（服务端在 from/to 当天返回换过科目的课表）：
+// 同一天时为单日条件，跨天时为覆盖两端的最小范围
+export function buildSwapCondition(rawSwap) {
+  const { from, to } = normalizeSwap(rawSwap)
+  if (!from.date || !to.date) return createCondition(ConditionKind.DATE)
+  if (from.date === to.date) return { kind: ConditionKind.DATE, date: from.date }
+  // YYYY-MM-DD 的字典序与时间序一致
+  return from.date < to.date
+      ? { kind: ConditionKind.RANGE, startDate: from.date, endDate: to.date }
+      : { kind: ConditionKind.RANGE, startDate: to.date, endDate: from.date }
+}
+
+// 只保留 月-日，用于列表与卡片里的紧凑描述
+function formatMonthDay(date) {
+  const matched = /^\d{4}-(\d{2}-\d{2})$/.exec(String(date || ''))
+  return matched ? matched[1] : '?'
+}
+
+// 两端日期相同时只显示一次，例如 09-15 ~ 09-16 / 09-15
+export function formatSwapDateRange(rawSwap) {
+  const { from, to } = normalizeSwap(rawSwap)
+  if (!from.date || !to.date) return ''
+  return from.date === to.date ? formatMonthDay(from.date) : formatMonthDay(from.date) + ' ~ ' + formatMonthDay(to.date)
+}
+
+function describeSwap(rawSwap) {
+  const { from, to } = normalizeSwap(rawSwap)
+  const head = formatMonthDay(from.date) + ' 第' + from.period + '节'
+  const sameDay = !!from.date && from.date === to.date
+  const tail = sameDay ? '第' + to.period + '节' : formatMonthDay(to.date) + ' 第' + to.period + '节'
+  return `调课：${head} ↔ ${tail}`
 }
 
 export function createEntry(type) {
@@ -214,6 +275,9 @@ export function normalizeEntry(raw, type) {
           ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
           : []
     }
+  }
+  if (type === AutorunType.LESSON_SWAP) {
+    entry.action.swap = normalizeSwap(action?.swap)
   }
   if (type === AutorunType.CLIENT_CONFIG) {
     const settings = {}
@@ -261,6 +325,7 @@ export function describeEntry(task, entry) {
   if (type === AutorunType.COMPENSATION) return `上 ${action.useDate || '?'} 的课`
   if (type === AutorunType.TIMETABLE) return `作息表：${action.timetableId || '?'}`
   if (type === AutorunType.SCHEDULE) return `课程表（${(action.schedule?.periods || []).length} 节）`
+  if (type === AutorunType.LESSON_SWAP) return describeSwap(action.swap)
   if (type === AutorunType.ALL) return `作息表：${action.timetableId || '?'} + 课程表（${(action.schedule?.periods || []).length} 节）`
   if (type === AutorunType.CLIENT_CONFIG) {
     const on = clientConfigSettingOptions.filter(o => action.settings?.[o.key] === true).map(o => o.label)
@@ -274,7 +339,10 @@ export function summarizeEntries(task) {
   const entries = Array.isArray(task?.entries) ? task.entries : []
   if (entries.length === 0) return '（无条目）'
   const first = entries[0]
-  const head = `${describeCondition(first.when)} · ${describeEntry(task, first)}`
+  // 调课的生效条件就是两端日期，已包含在描述里，不再重复前缀
+  const head = decodeAutorunType(task?.type) === AutorunType.LESSON_SWAP
+      ? describeEntry(task, first)
+      : `${describeCondition(first.when)} · ${describeEntry(task, first)}`
   return entries.length > 1 ? `${head} 等 ${entries.length} 条` : head
 }
 

@@ -46,17 +46,18 @@ const typeTypeMapNum = {
   [AutorunType.COMPENSATION]: 'warning',
   [AutorunType.TIMETABLE]: 'info',
   [AutorunType.SCHEDULE]: 'success',
+  [AutorunType.LESSON_SWAP]: 'error',
   [AutorunType.ALL]: 'default',
   [AutorunType.CLIENT_CONFIG]: 'primary'
 }
 const typeTypeMapStr = {
   'COMPENSATION': 'warning', 'TIMETABLE': 'info', 'SCHEDULE': 'success',
-  'ALL': 'default', 'CLIENT_CONFIG': 'primary'
+  'LESSON_SWAP': 'error', 'ALL': 'default', 'CLIENT_CONFIG': 'primary'
 }
 
 function getTypeLabelFlexible(type) {
   if (typeof type === 'number') return getAutorunTypeLabel(type)
-  const map = {COMPENSATION: '调休', TIMETABLE: '作息表调整', SCHEDULE: '课程表调整', ALL: '全部调整', CLIENT_CONFIG: '客户端配置'}
+  const map = {COMPENSATION: '调休', TIMETABLE: '作息表调整', SCHEDULE: '课程表调整', LESSON_SWAP: '调课', ALL: '全部调整', CLIENT_CONFIG: '客户端配置'}
   return map[type] || String(type)
 }
 

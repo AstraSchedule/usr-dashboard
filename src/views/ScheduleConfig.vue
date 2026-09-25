@@ -41,6 +41,7 @@ const dynamicForm = reactive({
 const showModal = ref(false);
 const saving = ref(false);
 const dataLoaded = ref(false);
+const messages = useMessage();
 
 function submit() {
   showModal.value = true;
@@ -64,11 +65,9 @@ async function onPwdConfirm(password) {
     await confirmAction(password, (cfg) =>
       axios.put(`${getAPISRV()}/web/config/${school.value}/${grade.value}/${cls.value}/schedule`, payload, cfg)
     )
-    const messages = useMessage();
     messages.success("服务端说行")
     showModal.value = false
   } catch (error) {
-    const messages = useMessage();
     if (error.status === 401) messages.error("你寻思寻思这密码它对吗？")
     else if (error.status === 400) messages.error("码姿不对，删了重写！（服务端校验不通过）")
     else if(error?.status === 403) messages.error('无权访问：有些门总是关着的')

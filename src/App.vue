@@ -142,14 +142,20 @@ axios.interceptors.request.use(config => {
   return config
 })
 
+// 密码错误的 401 不是会话失效：detail 对应 usr-backend VerifyPassword「密码错误」
+// 与 JWTAndPassword「需要提供密码」「你寻思寻思这密码它对吗？」（均表示验密失败而非令牌过期）。
+// 若一并登出，密码管理器填充竞态提交空/错密码就会被概率性踢回登录页（#60）。
+const PASSWORD_ERROR_DETAILS = new Set([
+  '密码错误',
+  '需要提供密码',
+  '你寻思寻思这密码它对吗？'
+])
+
 axios.interceptors.response.use(
   resp => resp,
   error => {
-    const status = error?.response?.status
-    const url = error?.config?.url || ''
-    // verify-password 的 401 是密码错误，不是 token 过期，不触发退出
-    const isVerifyPwd = url.includes('/web/auth/verify-password')
-    if (status === 401 && !isVerifyPwd) {
+    const detail = error?.response?.data?.detail
+    if (error?.response?.status === 401 && !PASSWORD_ERROR_DETAILS.has(detail)) {
       removeToken()
       router.replace('/login')
     }

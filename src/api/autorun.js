@@ -106,8 +106,6 @@ export function parseScope(value) {
   return { level, school, grade, class: cls }
 }
 
-let scopeTreeCache = null
-
 function isLevelNode(node) {
   return node && typeof node === 'object' && 'raw' in node && !node.to
 }
@@ -150,11 +148,11 @@ function buildScopeTreeFromMenu(menu) {
 }
 
 export async function fetchScopeTree() {
-  if (scopeTreeCache) return { data: scopeTreeCache }
+  // 生效域取决于「当前后端地址（租户）」：登录/登出走 SPA 路由、页面不 reload，
+  // 任何模块级缓存都会把上一个租户的学校/年级/班级带到新租户，故每次都重新拉取
   const resp = await axios.get(`${getAPISRV()}/web/menu`)
   const payload = resp?.data?.data || []
-  scopeTreeCache = buildScopeTreeFromMenu(payload)
-  return { data: scopeTreeCache }
+  return { data: buildScopeTreeFromMenu(payload) }
 }
 
 export function flattenScope(nodes, prefix = '') {

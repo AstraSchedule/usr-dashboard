@@ -753,7 +753,12 @@ function cleanCondition(when) {
 function cleanAction(action) {
   if (form.type === AutorunType.COMPENSATION) return {useDate: action.useDate}
   if (form.type === AutorunType.TIMETABLE) return {timetableId: action.timetableId}
-  if (form.type === AutorunType.SCHEDULE) return {schedule: {periods: action.schedule?.periods || []}}
+  if (form.type === AutorunType.SCHEDULE) {
+    const out = {schedule: {periods: action.schedule?.periods || []}}
+    // 逐节轮换的来源标记必须随保存落库，否则下次打开编辑器就认不出自己的条目
+    if (action.source) out.source = action.source
+    return out
+  }
   if (form.type === AutorunType.ALL) return {timetableId: action.timetableId, schedule: {periods: action.schedule?.periods || []}}
   if (form.type === AutorunType.LESSON_SWAP) {
     const {from, to} = normalizeSwap(action?.swap)

@@ -169,6 +169,14 @@ test('mergePeriodRotationEntries 替换旧的逐节轮换条目且不碰其它�
   assert.ok(merged.entries.every(e => isPeriodRotationEntry(e) || e === plain || e === dated))
 })
 
+test('同形状但没有来源标记的手工条目不被接管', () => {
+  const manual = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries[0]
+  delete manual.action.source
+  assert.equal(isPeriodRotationEntry(manual), false)
+  assert.deepEqual(collapseEntriesToPerDay([manual]), [])
+  assert.deepEqual(mergePeriodRotationEntries([manual], []).entries, [manual])
+})
+
 test('带备注 / 停用 / 周期范围的条目不被逐节轮换视图接管', () => {
   const base = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries[0]
   const clone = () => JSON.parse(JSON.stringify(base))

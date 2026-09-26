@@ -16,6 +16,10 @@ export const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四',
 // 周期周数上限：2×3×5×7 这类组合会瞬间膨胀出上百条条目，超过一学年直接拒绝
 export const MAX_ROTATION_WEEKS = 52
 
+// 逐节轮换条目的来源标记：随 action 一起落库，是「这条由本视图生成」的权威依据。
+// 只看字段形状会把用户手工构造的同形状条目也吃掉，并重写它的 note / 停用状态 / 周期范围。
+export const PERIOD_ROTATION_SOURCE = 'period-rotation'
+
 function gcd(a, b) {
   let x = a
   let y = b
@@ -95,7 +99,7 @@ export function expandPerDayRotation(days, makeKey) {
         enabled: true,
         note: '',
         when: { kind: 'weekly', everyWeeks: cycle, weekOffset: week, weekdays: [weekday] },
-        action: { schedule: { periods: outPeriods } }
+        action: { schedule: { periods: outPeriods }, source: PERIOD_ROTATION_SOURCE }
       }
       if (typeof makeKey === 'function') entry._key = makeKey()
       entries.push(entry)
@@ -104,18 +108,19 @@ export function expandPerDayRotation(days, makeKey) {
   return { entries, errors }
 }
 
-// 判断条目是否由「逐节轮换」视图产出、并可由它接管：
-// 每周轮换 + 限定星期 + 课表内容，且没有用户手工附加的元数据（停用 / 备注 / 周期范围）。
-// 元数据必须参与判定 —— 本视图展开时用固定值重建条目，接管它们等于静默改写用户设置。
+// 判断条目是否由「逐节轮换」视图产出、并可由它接管。
+// 权威依据是 expand 写下的 action.source 标记；形状与元数据只是二次保护 ——
+// 本视图展开时用固定值重建条目，接管带备注 / 停用 / 周期范围的条目等于静默改写用户设置。
 export function isPeriodRotationEntry(entry) {
   const when = entry?.when || {}
-  const periods = entry?.action?.schedule?.periods
-  return when.kind === 'weekly'
+  const action = entry?.action || {}
+  return action.source === PERIOD_ROTATION_SOURCE
+      && when.kind === 'weekly'
       && Array.isArray(when.weekdays) && when.weekdays.length > 0
+      && Array.isArray(action?.schedule?.periods)
       && !when.startDate && !when.endDate
       && !entry?.note
       && entry?.enabled !== false
-      && Array.isArray(periods)
 }
 
 // 从已有条目还原视图数据：按天合并同一天的每周轮换条目，周期取各条 everyWeeks 的最小公倍数。

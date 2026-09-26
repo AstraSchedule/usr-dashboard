@@ -5,7 +5,7 @@ import {useRequest} from 'vue-request'
 import {useRouter} from 'vue-router'
 import axios from 'axios'
 import {getAPISRV} from '@/global.js'
-import {AutorunType, getAutorunTypeLabel, listTasks, summarizeEntries} from '@/api/autorun.js'
+import {AutorunType, deleteExpiredTasks, getAutorunTypeLabel, listTasks, summarizeEntries} from '@/api/autorun.js'
 import ScopeTags from '@/components/ScopeTags.vue'
 import ConfirmPasswordModal from '@/components/ConfirmPasswordModal.vue'
 import { confirmAction } from '@/api/auth.js'
@@ -105,6 +105,34 @@ async function doDelete(password) {
   }
 }
 
+// 清理已过期任务（需密码）
+const showClean = ref(false)
+const cleaning = ref(false)
+
+function askClean() {
+  showClean.value = true
+}
+
+async function doClean(password) {
+  cleaning.value = true
+  try {
+    const data = await deleteExpiredTasks(password)
+    const count = Number(data?.deleted) || 0
+    if (count > 0) message.success(`已清理 ${count} 个已过期任务`)
+    else message.info('没有可清理的已过期任务')
+    showClean.value = false
+    run()
+  } catch (e) {
+    const status = e?.status || e?.response?.status
+    if (status === 401) message.error('你寻思寻思这密码它对吗？')
+    else if (status === 400) message.error('码姿不对，删了重写！（服务端校验不通过）')
+    else if (status === 403) message.error('无权访问：有些门总是关着的')
+    else message.error(`服务端看完天塌了（状态码：${status??'未知'}）`)
+  } finally {
+    cleaning.value = false
+  }
+}
+
 function renderName(row) {
   return row.name
       ? h('span', {}, row.name)
@@ -152,6 +180,7 @@ function goAdd() {
     <template #header-extra>
       <n-space>
         <n-button size="small" @click="goAdd">新增</n-button>
+        <n-button size="small" type="warning" tertiary @click="askClean">清理已过期</n-button>
         <n-button size="small" @click="refresh" :loading="loading">刷新</n-button>
       </n-space>
     </template>
@@ -165,6 +194,15 @@ function goAdd() {
         title="删除确认"
         @confirm="doDelete"
         @update:show="val=> showDelete = val"
+    />
+
+    <confirm-password-modal
+        :loading="cleaning"
+        :show="showClean"
+        confirm-text="确认清理"
+        title="清理已过期任务"
+        @confirm="doClean"
+        @update:show="val=> showClean = val"
     />
   </n-card>
 </template>

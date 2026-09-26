@@ -664,7 +664,7 @@ async function loadPeriodDivider(school, grade) {
 async function importFromClassSchedule() {
   const target = pickSingleClass(form.scope)
   if (!target) {
-    message.warning('请把生效域收到恰好一个班级（学校/年级/班级）再导入')
+    message.warning('请把生效域限定为一个班级（学校/年级/班级）再导入')
     return
   }
   periodImporting.value = true

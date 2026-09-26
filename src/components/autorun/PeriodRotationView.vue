@@ -1,7 +1,7 @@
 <script setup>
 // 逐节轮换视图：每天的每一节各自是一条「周期内第 N 周 -> 科目」的序列。
 // 组件不直接修改 modelValue，统一通过 update:modelValue 回传新数组（与 ActionEditor 一致）。
-import { computed, ref } from 'vue'
+import { computed, ref, toRaw } from 'vue'
 import { NButton, NCard, NSelect, NSpace, NTag, NText } from 'naive-ui'
 import { WEEKDAY_LABELS, dayCycleWeeks } from '@/utils/rotation.js'
 
@@ -25,8 +25,9 @@ const previewWeeks = ref({})
 
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
 
+// Vue 的响应式代理不能直接 structuredClone（会抛 DataCloneError），先 toRaw 取原始对象
 function mutate(fn) {
-  const next = JSON.parse(JSON.stringify(list.value))
+  const next = structuredClone(toRaw(list.value))
   fn(next)
   emit('update:modelValue', next)
 }

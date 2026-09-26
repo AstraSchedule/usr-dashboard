@@ -71,6 +71,31 @@ function isWeekday(value) {
   return Number.isInteger(n) && n >= 0 && n <= 6
 }
 
+// 某一天在周期内第 week 周（0 起）的整张课表：每节按自己的序列取模，空序列保持为空
+function periodsOfWeek(periods, week) {
+  const out = []
+  for (const period of periods) {
+    const no = Math.floor(Number(period?.no) || 0)
+    if (no <= 0) continue
+    const weeks = Array.isArray(period?.weeks) ? period.weeks : []
+    const subject = weeks.length > 0 ? String(weeks[week % weeks.length] ?? '') : ''
+    out.push({ no, subject })
+  }
+  return out
+}
+
+function buildRotationEntry(weekday, cycle, week, periods, makeKey) {
+  const entry = {
+    id: '',
+    enabled: true,
+    note: '',
+    when: { kind: 'weekly', everyWeeks: cycle, weekOffset: week, weekdays: [weekday] },
+    action: { schedule: { periods: periodsOfWeek(periods, week) }, source: PERIOD_ROTATION_SOURCE }
+  }
+  if (typeof makeKey === 'function') entry._key = makeKey()
+  return entry
+}
+
 // 展开为自动任务条目；makeKey 可选，用于给条目补上前端稳定标识（_key 不会发给服务端）
 export function expandPerDayRotation(days, makeKey) {
   const entries = []
@@ -86,23 +111,7 @@ export function expandPerDayRotation(days, makeKey) {
       continue
     }
     for (let week = 0; week < cycle; week++) {
-      const outPeriods = []
-      for (const period of periods) {
-        const no = Math.floor(Number(period?.no) || 0)
-        if (no <= 0) continue
-        const weeks = Array.isArray(period?.weeks) ? period.weeks : []
-        const subject = weeks.length > 0 ? String(weeks[week % weeks.length] ?? '') : ''
-        outPeriods.push({ no, subject })
-      }
-      const entry = {
-        id: '',
-        enabled: true,
-        note: '',
-        when: { kind: 'weekly', everyWeeks: cycle, weekOffset: week, weekdays: [weekday] },
-        action: { schedule: { periods: outPeriods }, source: PERIOD_ROTATION_SOURCE }
-      }
-      if (typeof makeKey === 'function') entry._key = makeKey()
-      entries.push(entry)
+      entries.push(buildRotationEntry(weekday, cycle, week, periods, makeKey))
     }
   }
   return { entries, errors }
@@ -136,47 +145,69 @@ export function isGeneratedPeriodRotationEntry(entry) {
 //   2) 元数据干净（isCleanPeriodMeta）—— 接管会重建条目，不能顺手改掉用户的设置
 //   3) 周期完整铺满：everyWeeks 相同，weekOffset 恰好覆盖 0..N-1 各一次
 // 条件 3 让「用户手写的、只有部分周次的每周轮换条目」不会被误判成本视图的数据。
+// 单条条目能否成为候选：形状与元数据都要合格，且周期、偏移合法
+function asManagedCandidate(entry) {
+  if (!matchesPeriodShape(entry) || !isCleanPeriodMeta(entry)) return null
+  const every = Math.floor(Number(entry.when.everyWeeks) || 0)
+  const offset = Math.floor(Number(entry.when.weekOffset) || 0)
+  if (every < 2 || offset < 0 || offset >= every) return null
+  return { entry, every, offset, weekday: Number(entry.when.weekdays[0]) }
+}
+
+// 周期完整铺满：同周期，且偏移恰好覆盖 0..N-1 各一次
+function isFullCycleGroup(group) {
+  const cycle = group[0].every
+  if (group.some(item => item.every !== cycle)) return false
+  const offsets = new Set(group.map(item => item.offset))
+  return offsets.size === group.length && offsets.size === cycle
+}
+
+function collectPeriodNumbers(group) {
+  const nos = new Set()
+  for (const item of group) {
+    for (const period of item.entry.action.schedule.periods) {
+      const no = Math.floor(Number(period?.no) || 0)
+      if (no > 0) nos.add(no)
+    }
+  }
+  return [...nos].sort((a, b) => a - b)
+}
+
+// 第 week 周第 no 节的科目：在该周那条条目的课表里查
+function subjectOfWeek(group, week, no) {
+  const owner = group.find(item => item.offset === week)
+  const source = owner?.entry.action.schedule.periods.find(p => Number(p?.no) === no)
+  return source ? String(source.subject ?? '') : ''
+}
+
+function buildManagedDay(weekday, group) {
+  if (!isFullCycleGroup(group)) return null
+  const cycle = group[0].every
+  return {
+    weekday,
+    periods: collectPeriodNumbers(group).map(no => ({
+      no,
+      weeks: Array.from({ length: cycle }, (_, week) => subjectOfWeek(group, week, no))
+    }))
+  }
+}
+
 function collectManagedPeriodEntries(entries) {
-  const list = Array.isArray(entries) ? entries : []
   const candidates = new Map()
-  for (const entry of list) {
-    if (!matchesPeriodShape(entry) || !isCleanPeriodMeta(entry)) continue
-    const every = Math.floor(Number(entry.when.everyWeeks) || 0)
-    const offset = Math.floor(Number(entry.when.weekOffset) || 0)
-    if (every < 2 || offset < 0 || offset >= every) continue
-    const weekday = Number(entry.when.weekdays[0])
-    if (!candidates.has(weekday)) candidates.set(weekday, [])
-    candidates.get(weekday).push({ entry, every, offset })
+  for (const entry of (Array.isArray(entries) ? entries : [])) {
+    const item = asManagedCandidate(entry)
+    if (!item) continue
+    if (!candidates.has(item.weekday)) candidates.set(item.weekday, [])
+    candidates.get(item.weekday).push(item)
   }
   const days = []
   const managed = new Set()
   for (const weekday of [...candidates.keys()].sort((a, b) => a - b)) {
     const group = candidates.get(weekday)
-    const cycle = group[0].every
-    if (group.some(item => item.every !== cycle)) continue
-    const byOffset = new Map()
-    let duplicated = false
-    for (const item of group) {
-      if (byOffset.has(item.offset)) { duplicated = true; break }
-      byOffset.set(item.offset, item.entry)
-    }
-    if (duplicated || byOffset.size !== cycle) continue
-    const nos = new Set()
-    for (const item of group) {
-      for (const period of item.entry.action.schedule.periods) {
-        const no = Math.floor(Number(period?.no) || 0)
-        if (no > 0) nos.add(no)
-      }
-    }
-    const periods = [...nos].sort((a, b) => a - b).map(no => ({
-      no,
-      weeks: Array.from({ length: cycle }, (_, week) => {
-        const source = byOffset.get(week).action.schedule.periods.find(p => Number(p?.no) === no)
-        return source ? String(source.subject ?? '') : ''
-      })
-    }))
-    days.push({ weekday, periods })
-    for (const entry of byOffset.values()) managed.add(entry)
+    const day = buildManagedDay(weekday, group)
+    if (!day) continue
+    days.push(day)
+    for (const item of group) managed.add(item.entry)
   }
   return { days, managed }
 }

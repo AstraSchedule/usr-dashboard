@@ -157,42 +157,58 @@ function resetRotationRows(weeks) {
   rotationRows.value = next
 }
 
+// 轮换周期超限的提示文案（轮换表与逐节轮换共用）
+function periodCycleErrorText(errors) {
+  return errors.map(e => WEEKDAY_LABELS[e.weekday] + ' 的轮换周期 ' + e.cycle + ' 周超过上限 ' + MAX_ROTATION_WEEKS + ' 周').join('；')
+}
+
+// 进入逐节轮换视图：只接管「逐节轮换」形状的条目，其余条目留在条目列表里互不干扰
+function enterPeriodView() {
+  periodDays.value = collapseEntriesToPerDay(form.entries)
+  if (periodDays.value.length === 0 && form.entries.length > 0) {
+    message.info('当前条目不是逐节轮换，视图为空；其余条目不受影响')
+  }
+}
+
+// 离开逐节轮换视图：把当前编辑结果写回条目列表。
+// 有超限的天时不能写回：merge 会跳过那一天，写回等于静默丢掉它的轮换配置
+function leavePeriodView() {
+  const merged = mergePeriodRotationEntries(form.entries, periodDays.value, nextEntryKey)
+  if (merged.errors.length > 0) {
+    message.warning(periodCycleErrorText(merged.errors))
+    return false
+  }
+  form.entries = ensureEntryKeys(merged.entries)
+  return true
+}
+
+// 进入轮换表视图：同周期铺满的每周轮换条目可还原成表格，
+// 否则用首条条目的内容预填第一行，并明确提示保存时会按轮换表展开
+function enterRotationView() {
+  const grouped = groupWeeklyEntries(form.entries)
+  if (grouped) {
+    rotationWeeks.value = grouped.everyWeeks
+    rotationRows.value = grouped.rows
+    return
+  }
+  const seed = form.entries[0]?.action
+  rotationRows.value = []
+  resetRotationRows(rotationWeeks.value)
+  if (seed) rotationRows.value[0] = clonePlain(seed)
+  message.info('当前条目不是单一的每周轮换，轮换表保存时会展开为 ' + rotationRows.value.length + ' 条每周轮换条目')
+}
+
 function switchView(mode) {
   if (mode === viewMode.value) return
   if (mode === 'period') {
     if (!periodRotationAvailable.value) return
-    // 只接管「逐节轮换」形状的条目，其余条目留在条目列表里互不干扰
-    periodDays.value = collapseEntriesToPerDay(form.entries)
-    if (periodDays.value.length === 0 && form.entries.length > 0) {
-      message.info('当前条目不是逐节轮换，视图为空；其余条目不受影响')
-    }
+    enterPeriodView()
     viewMode.value = mode
     return
   }
-  // 离开逐节轮换视图：把当前编辑结果写回条目列表。
-  // 有超限的天时不能写回：merge 会跳过那一天，写回等于静默丢掉它的轮换配置
-  if (viewMode.value === 'period') {
-    const merged = mergePeriodRotationEntries(form.entries, periodDays.value, nextEntryKey)
-    if (merged.errors.length > 0) {
-      message.warning(merged.errors.map(e => WEEKDAY_LABELS[e.weekday] + ' 的轮换周期 ' + e.cycle + ' 周超过上限 ' + MAX_ROTATION_WEEKS + ' 周').join('；'))
-      return
-    }
-    form.entries = ensureEntryKeys(merged.entries)
-  }
+  if (viewMode.value === 'period' && !leavePeriodView()) return
   if (mode === 'rotation') {
-    const grouped = groupWeeklyEntries(form.entries)
-    if (grouped) {
-      rotationWeeks.value = grouped.everyWeeks
-      rotationRows.value = grouped.rows
-    } else {
-      // 当前条目不是「同周期铺满的每周轮换」，无法还原成表格：
-      // 用首条条目的内容预填第一行，并明确提示保存时会按轮换表展开
-      const seed = form.entries[0]?.action
-      rotationRows.value = []
-      resetRotationRows(rotationWeeks.value)
-      if (seed) rotationRows.value[0] = clonePlain(seed)
-      message.info('当前条目不是单一的每周轮换，轮换表保存时会展开为 ' + rotationRows.value.length + ' 条每周轮换条目')
-    }
+    enterRotationView()
   } else if (viewMode.value === 'rotation') {
     const generated = rotationToEntries()
     if (generated.length > 0) form.entries = generated
@@ -824,7 +840,7 @@ function validate() {
   if (viewMode.value === 'period') {
     const { errors } = expandPerDayRotation(periodDays.value)
     if (errors.length > 0) {
-      message.warning(errors.map(e => WEEKDAY_LABELS[e.weekday] + ' 的轮换周期 ' + e.cycle + ' 周超过上限 ' + MAX_ROTATION_WEEKS + ' 周').join('；'))
+      message.warning(periodCycleErrorText(errors))
       return false
     }
   }

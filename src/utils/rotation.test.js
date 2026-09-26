@@ -169,6 +169,20 @@ test('mergePeriodRotationEntries 替换旧的逐节轮换条目且不碰其它�
   assert.ok(merged.entries.every(e => isPeriodRotationEntry(e) || e === plain || e === dated))
 })
 
+test('带备注 / 停用 / 周期范围的条目不被逐节轮换视图接管', () => {
+  const base = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries[0]
+  const clone = () => JSON.parse(JSON.stringify(base))
+  const withNote = {...clone(), note: '手工备注'}
+  const disabled = {...clone(), enabled: false}
+  const dated = {...clone(), when: {...clone().when, startDate: '2026-09-01', endDate: '2026-10-01'}}
+  assert.equal(isPeriodRotationEntry(base), true)
+  assert.equal(isPeriodRotationEntry(withNote), false)
+  assert.equal(isPeriodRotationEntry(disabled), false)
+  assert.equal(isPeriodRotationEntry(dated), false)
+  assert.deepEqual(collapseEntriesToPerDay([withNote, disabled, dated]), [])
+  assert.deepEqual(mergePeriodRotationEntries([withNote, disabled, dated], []).entries, [withNote, disabled, dated])
+})
+
 test('importFromClassList 跳过没有轮换的天', () => {
   const days = importFromClassList(legacyDailyClass())
   assert.deepEqual(days.map(day => day.weekday), [1])

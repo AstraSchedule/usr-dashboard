@@ -125,6 +125,10 @@ const rotationTemplateDate = ref(null)
 const rotationAvailable = computed(() =>
   form.type !== AutorunType.COMPENSATION && form.type !== AutorunType.LESSON_SWAP)
 
+// 逐节轮换只服务「课程表调整」：其它类型需要作息表 ID 或客户端设置，
+// 展开出的条目缺少必需字段，服务端会直接拒绝
+const periodRotationAvailable = computed(() => form.type === AutorunType.SCHEDULE)
+
 // 逐节轮换视图：每节可独立周期，保存时按天展开为「每周轮换」条目
 const periodDays = ref([])
 const periodImporting = ref(false)
@@ -156,6 +160,7 @@ function resetRotationRows(weeks) {
 function switchView(mode) {
   if (mode === viewMode.value) return
   if (mode === 'period') {
+    if (!periodRotationAvailable.value) return
     // 只接管「逐节轮换」形状的条目，其余条目留在条目列表里互不干扰
     periodDays.value = collapseEntriesToPerDay(form.entries)
     if (periodDays.value.length === 0 && form.entries.length > 0) {
@@ -164,9 +169,14 @@ function switchView(mode) {
     viewMode.value = mode
     return
   }
-  // 离开逐节轮换视图：把当前编辑结果写回条目列表
+  // 离开逐节轮换视图：把当前编辑结果写回条目列表。
+  // 有超限的天时不能写回：merge 会跳过那一天，写回等于静默丢掉它的轮换配置
   if (viewMode.value === 'period') {
     const merged = mergePeriodRotationEntries(form.entries, periodDays.value, nextEntryKey)
+    if (merged.errors.length > 0) {
+      message.warning(merged.errors.map(e => WEEKDAY_LABELS[e.weekday] + ' 的轮换周期 ' + e.cycle + ' 周超过上限 ' + MAX_ROTATION_WEEKS + ' 周').join('；'))
+      return
+    }
     form.entries = ensureEntryKeys(merged.entries)
   }
   if (mode === 'rotation') {
@@ -236,6 +246,8 @@ watch(() => form.type, (type, oldType) => {
   // 类型变了，轮换表里的内容结构也变了，必须丢弃旧行
   rotationRows.value = []
   periodDays.value = []
+  // 逐节轮换只在课程表调整下可用，切到别的类型必须离开该视图
+  if (viewMode.value === 'period' && !periodRotationAvailable.value) viewMode.value = 'list'
   if (rotationAvailable.value) {
     resetRotationRows(rotationWeeks.value)
   } else {
@@ -619,13 +631,18 @@ async function autoFillSchedule(target, rotationIndex) {
 // ============================================================
 // 逐节轮换：从班级课表导入
 // ============================================================
-// 生效域里显式指定的第一个班级；只有年级/学校时无法确定课表，返回 null
-function pickExplicitClass(scopes) {
-  for (const value of (Array.isArray(scopes) ? scopes : [])) {
+// 条目是任务级配置、作用于整个生效域：只有生效域恰好落在一个班级上时，
+// 用这个班的课表导入才不会把它的课表套到别的班
+function pickSingleClass(scopes) {
+  const list = Array.isArray(scopes) ? scopes : []
+  const classes = []
+  for (const value of list) {
     const parts = String(value || '').split('/').filter(Boolean)
-    if (parts.length >= 3) return {school: parts[0], grade: parts[1], cls: parts[2]}
+    if (parts.length < 3) return null
+    classes.push(parts)
   }
-  return null
+  if (classes.length !== 1) return null
+  return {school: classes[0][0], grade: classes[0][1], cls: classes[0][2]}
 }
 
 async function loadPeriodDivider(school, grade) {
@@ -645,9 +662,9 @@ async function loadPeriodDivider(school, grade) {
 }
 
 async function importFromClassSchedule() {
-  const target = pickExplicitClass(form.scope)
+  const target = pickSingleClass(form.scope)
   if (!target) {
-    message.warning('请把生效域选到一个具体班级（学校/年级/班级）')
+    message.warning('请把生效域收到恰好一个班级（学校/年级/班级）再导入')
     return
   }
   periodImporting.value = true
@@ -909,7 +926,7 @@ async function confirmSave(pwd) {
         <n-space align="center">
           <n-button size="small" :type="viewMode === 'list' ? 'primary' : 'default'" @click="switchView('list')">条目列表</n-button>
           <n-button size="small" :type="viewMode === 'rotation' ? 'primary' : 'default'" @click="switchView('rotation')">轮换表</n-button>
-          <n-button size="small" :type="viewMode === 'period' ? 'primary' : 'default'" @click="switchView('period')">逐节轮换</n-button>
+          <n-button v-if="periodRotationAvailable" size="small" :type="viewMode === 'period' ? 'primary' : 'default'" @click="switchView('period')">逐节轮换</n-button>
           <n-text depth="3" style="font-size:12px;">
             轮换表按「每 N 周的第 X 周」聚合整周；逐节轮换允许每节周期不同
           </n-text>

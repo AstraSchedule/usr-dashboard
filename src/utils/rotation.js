@@ -104,12 +104,17 @@ export function expandPerDayRotation(days, makeKey) {
   return { entries, errors }
 }
 
-// 判断条目是否由「逐节轮换」视图产出：每周轮换 + 限定星期 + 课表内容
+// 判断条目是否由「逐节轮换」视图产出、并可由它接管：
+// 每周轮换 + 限定星期 + 课表内容，且没有用户手工附加的元数据（停用 / 备注 / 周期范围）。
+// 元数据必须参与判定 —— 本视图展开时用固定值重建条目，接管它们等于静默改写用户设置。
 export function isPeriodRotationEntry(entry) {
   const when = entry?.when || {}
   const periods = entry?.action?.schedule?.periods
   return when.kind === 'weekly'
       && Array.isArray(when.weekdays) && when.weekdays.length > 0
+      && !when.startDate && !when.endDate
+      && !entry?.note
+      && entry?.enabled !== false
       && Array.isArray(periods)
 }
 

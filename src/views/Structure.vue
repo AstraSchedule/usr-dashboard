@@ -1,5 +1,5 @@
 <script setup>
-import {h, ref, onMounted} from 'vue'
+import {ref, onMounted} from 'vue'
 import {
   NButton, NCard, NEmpty, NInput, NModal, NSpace, NText, useMessage
 } from 'naive-ui'
@@ -16,6 +16,8 @@ async function refreshTree() {
     const resp = await axios.get(`${APISRV}/web/structure`)
     tree.value = resp.data || []
   } catch (e) {
+    // 读取失败时退化为空树（界面显示「暂无数据」，用户可手动刷新重试），同时留日志便于排查
+    console.warn('[structure] 结构树获取失败', e)
     tree.value = []
   }
 }
@@ -48,9 +50,14 @@ function doCreate() {
     const cfg = {headers: {'X-Verify-Password': pwd}}
     const p = modalParent.value
     const createdName = modalName.value
-    const fn = modalType.value === 'school' ? createSchool(createdName, cfg)
-      : modalType.value === 'grade' ? createGrade(p, createdName, cfg)
-      : createClass(p.split('/')[0], p.split('/')[1], createdName, cfg)
+    let fn
+    if (modalType.value === 'school') {
+      fn = createSchool(createdName, cfg)
+    } else if (modalType.value === 'grade') {
+      fn = createGrade(p, createdName, cfg)
+    } else {
+      fn = createClass(p.split('/')[0], p.split('/')[1], createdName, cfg)
+    }
     fn.then(() => {
       message.success('创建成功')
       showModal.value = false
@@ -82,7 +89,14 @@ function onPwdConfirm(pwd) {
 function doDelete(type, ...args) {
   pendingFn = (pwd) => {
     const cfg = {headers: {'X-Verify-Password': pwd}}
-    const fn = type === 'school' ? deleteSchool(args[0], cfg) : type === 'grade' ? deleteGrade(args[0], args[1], cfg) : deleteClass(args[0], args[1], args[2], cfg)
+    let fn
+    if (type === 'school') {
+      fn = deleteSchool(args[0], cfg)
+    } else if (type === 'grade') {
+      fn = deleteGrade(args[0], args[1], cfg)
+    } else {
+      fn = deleteClass(args[0], args[1], args[2], cfg)
+    }
     fn.then(() => { message.success('删除成功'); refreshTree() }).catch(e => message.error(e?.response?.data?.detail || '删除失败'))
   }
   pwdShow.value = true

@@ -9,7 +9,7 @@ import { APISRV } from '@/global.js'
 import { useRequest } from 'vue-request'
 import { useRoute } from 'vue-router'
 import ConfirmPasswordModal from '@/components/ConfirmPasswordModal.vue'
-import { verifyPassword, confirmAction } from '@/api/auth.js'
+import { confirmAction } from '@/api/auth.js'
 
 const route = useRoute()
 const school = computed(() => route.params.school)

@@ -32,6 +32,17 @@ function onKindChange(next) {
   emit('update:modelValue', createCondition(next))
 }
 
+// 「第 X 周」按人类习惯 1 起显示；weekOffset 仍是 0 起的协议字段（0 = 周期的第 1 周，
+// 即锚点那周）。±1 只发生在显示层：已有条目与保存载荷都不受影响。
+const weekOffsetDisplay = computed({
+  get: () => (Number(when.value?.weekOffset) || 0) + 1,
+  set: (v) => {
+    if (!when.value) return
+    const display = Number(v)
+    when.value.weekOffset = Number.isFinite(display) && display > 1 ? Math.round(display) - 1 : 0
+  }
+})
+
 // NInputNumber 的 max 只限制输入，不会修正已有值：周期变短时同步把槽位钳制回合法范围
 watch(() => when.value?.everyWeeks, (every) => {
   if (!when.value) return
@@ -66,7 +77,7 @@ function onWeekdaysChange(list) {
         <span>每</span>
         <n-input-number v-model:value="when.everyWeeks" :min="1" :max="52" :show-button="false" style="width:80px" />
         <span>周的第</span>
-        <n-input-number v-model:value="when.weekOffset" :min="0" :max="Math.max(0, (Number(when.everyWeeks) || 1) - 1)" :show-button="false" style="width:80px" />
+        <n-input-number v-model:value="weekOffsetDisplay" :min="1" :max="Math.max(1, Number(when.everyWeeks) || 1)" :show-button="false" style="width:80px" />
         <span>周生效</span>
       </template>
       <template v-else-if="kind === ConditionKind.EVENT">

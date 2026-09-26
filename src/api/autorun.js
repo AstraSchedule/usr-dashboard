@@ -453,3 +453,22 @@ export async function fetchCompYearPairs(year) {
     return { data: { year, pairs: [] } }
   }
 }
+
+// 班级课表原始配置（daily_class 的 classList 保留多周轮换数组），用于把旧轮换课表转成自动任务
+export async function fetchClassScheduleRaw(school, grade, cls) {
+  const resp = await axios.get(`${getAPISRV()}/web/config/${school}/${grade}/${cls}/schedule`)
+  const days = Array.isArray(resp?.data?.daily_class) ? resp.data.daily_class : []
+  return { dailyClass: days }
+}
+
+// 作息表配置里的分隔线（作息表名 -> 课程序号数组，0 起），仅用于逐节轮换视图的课表横条
+export async function fetchTimetableDivider(school, grade) {
+  try {
+    const resp = await axios.get(`${getAPISRV()}/web/config/${school}/${grade}/timetable`)
+    const divider = resp?.data?.divider
+    return { divider: divider && typeof divider === 'object' ? divider : {} }
+  } catch (e) {
+    console.warn('[autorun] 分隔线读取失败', e)
+    return { divider: {} }
+  }
+}

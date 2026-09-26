@@ -167,7 +167,7 @@ useThemeVars();
                 description="星辰落旧室，星程起新程"
             >
                 <template #icon>
-                    <img src="https://cn-nb1.rains3.com/kuohublog-images/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png" alt="星程课表" style="width: 80px; height: 80px;" />
+                    <img src="https://static.khbit.cn/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png" alt="星程课表" style="width: 80px; height: 80px;" />
                 </template>
                 <template #footer>
                     <NButton @click="showHitokoto = true; refreshHitokoto()">换一句</NButton>

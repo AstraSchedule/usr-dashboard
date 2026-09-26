@@ -28,8 +28,7 @@ const editId = ref(null)
 const form = ref({username: '', password: '', role: 'class_w', scope: '', must_change_pwd: true, must_change_username: false})
 let skipScopeReset = false
 
-// NOSONAR: 页面组件引入顶层 await 会被要求 Suspense 包裹，这里保留 promise 链
-axios.get(`${APISRV}/web/structure`).then(r => { rawScopeTree.value = r.data || [] }).catch(e => { console.warn('[users] 结构树获取失败', e) })
+axios.get(`${APISRV}/web/structure`).then(r => { rawScopeTree.value = r.data || [] }).catch(e => { console.warn('[users] 结构树获取失败', e) }) // NOSONAR: 页面组件引入顶层 await 会变成异步组件、要求 Suspense 包裹
 
 const {loading: listLoading, run: fetchUsers} = useRequest(listUsers, {
   manual: false,

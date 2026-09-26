@@ -1,13 +1,9 @@
 <template>
+  <!-- 🤔 -->
   <n-config-provider :theme="theme" date-locale="dateZhCN" locale="zhCN" class="full" :hljs="hljs">
     <n-message-provider class="full">
       <n-dialog-provider class="full">
-        <!-- 登录页：不渲染侧栏 -->
-        <template v-if="isLoginPage">
-          <router-view></router-view>
-        </template>
-        <!-- 已登录：渲染侧栏布局 -->
-        <n-space v-else vertical class="full">
+        <n-space vertical class="full">
           <n-layout has-sider style="height: 100vh">
             <n-layout-sider
               bordered
@@ -21,7 +17,7 @@
               class="app-sider"
             >
               <div class="sider-logo" :class="{ 'collapsed': collapsed }">
-                <img src="https://cn-nb1.rains3.com/kuohublog-images/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png" alt="Logo" class="logo-img" />
+                <img src="https://static.khbit.cn/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png" alt="Logo" class="logo-img" />
                 <span v-if="!collapsed" class="logo-text">星程课表</span>
               </div>
               <n-menu
@@ -62,7 +58,6 @@
                 </template>
               </n-alert>
               <router-view></router-view>
-              <IcpFiling />
             </n-layout>
           </n-layout>
         </n-space>
@@ -72,7 +67,7 @@
     <n-modal v-model:show="showInitModal" preset="dialog" title="初始化服务器">
       <n-form label-placement="top">
         <n-form-item label="学校">
-          <n-input v-model:value="initForm.school" placeholder="例如：zh"/>
+          <n-input v-model:value="initForm.school" placeholder="例如：实验中学"/>
         </n-form-item>
         <n-form-item label="年级">
           <n-input v-model:value="initForm.grade" placeholder="例如：高一"/>
@@ -128,11 +123,8 @@ import axios from "axios";
 import {getAPISRV} from "@/global.js";
 import {getToken, removeToken, isLoggedIn, getUserInfo, setUserInfo, removeUserInfo} from "@/auth.js";
 import hljs from 'highlight.js/lib/core'
-import IcpFiling from '@/components/IcpFiling.vue'
 
 const router = useRouter()
-
-const isLoginPage = computed(() => router.currentRoute.value.name === 'Login')
 
 axios.interceptors.request.use(config => {
   const token = getToken()
@@ -177,19 +169,12 @@ if (isLoggedIn() && !userInfo.value.username) {
     .catch(() => {})
 }
 
-// 暴露刷新菜单方法给子组件
-const refreshMenu = () => {
-  getMenu().then(updateMenuFromResponse).catch(e => console.error('[menu] 刷新失败', e));
-};
-provide('refreshMenu', refreshMenu);
-
-// 路由变化时刷新 userInfo 和菜单（登录后跳转时触发）
+// 路由变化时刷新 userInfo（登录后跳转时触发）
 watch(() => router.currentRoute.value.path, () => {
   if (isLoggedIn()) {
     axios.get(`${getAPISRV()}/web/auth/me`)
       .then(resp => { setUserInfo(resp.data); userInfo.value = resp.data })
       .catch(() => {})
-    refreshMenu()
   }
 })
 
@@ -441,7 +426,6 @@ async function submitInitServer() {
     message.log('初始化成功，正在刷新菜单');
     showInitModal.value = false;
     initForm.password = '';
-    showInitServerEntry.value = false;
 
     const response = await getMenu();
     updateMenuFromResponse(response);
@@ -481,6 +465,12 @@ useRequest(
       }
     }
 );
+
+// 暴露刷新菜单方法给子组件
+const refreshMenu = () => {
+  getMenu().then(updateMenuFromResponse).catch(e => console.error('[menu] 刷新失败', e));
+};
+provide('refreshMenu', refreshMenu);
 
 let activeKey =  ref(null), collapsed = ref(false)
 

@@ -164,9 +164,10 @@ const userInfo = ref(getUserInfo())
 
 // 如果有 token 但没有 userInfo，从 API 获取
 if (isLoggedIn() && !userInfo.value.username) {
+  // NOSONAR: 根组件引入顶层 await 会变成异步组件并强制 Suspense 包裹，保留 promise 链
   axios.get(`${APISRV}/web/auth/me`)
     .then(resp => { setUserInfo(resp.data); userInfo.value = resp.data })
-    .catch(() => {})
+    .catch(e => { console.warn('[app] 获取用户信息失败', e) })
 }
 
 // 路由变化时刷新 userInfo（登录后跳转时触发）

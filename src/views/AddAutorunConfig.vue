@@ -147,7 +147,7 @@ function emptyAction() {
 // Vue 的 reactive 对象是 Proxy，structuredClone 会直接抛 DataCloneError；
 // 条目内容本身都是纯 JSON 数据（日期是字符串、节次是数字），用 JSON 往返克隆即可
 function clonePlain(value) {
-  return JSON.parse(JSON.stringify(value))
+  return JSON.parse(JSON.stringify(value)) // NOSONAR: Vue 的 reactive 是 Proxy，structuredClone 会抛 DataCloneError
 }
 
 function resetRotationRows(weeks) {
@@ -333,7 +333,7 @@ const isRestDay = computed(() => detectedNeedRaw.value !== null && toCount(detec
 function toCount(rawNeed) {
   const n = Number(rawNeed)
   if (!Number.isFinite(n)) return 0
-  return n < 0 ? 0 : n
+  return Math.max(n, 0)
 }
 
 // 调课节次下拉的范围：优先用该作用域作息表的节次数（options.need 即所需课节行数），
@@ -371,6 +371,27 @@ function pickSchoolGrade(selected) {
   return null
 }
 
+// 把一个 scope 值展开成班级：a/b/c 直接取；a/b 或 a 按作用域树下钻到班级层
+function expandScopeValue(value, push) {
+  const parts = String(value).split('/').filter(Boolean)
+  if (parts.length >= 3) {
+    push(parts[0], parts[1], parts[2])
+    return
+  }
+  const node = findNodeByValue(scopeTreeRef.value, value)
+  const middleLevel = Array.isArray(node?.children) ? node.children : []
+  for (const mid of middleLevel) {
+    if (parts.length === 2) {
+      push(...String(mid.value || '').split('/').filter(Boolean))
+      continue
+    }
+    const classLevel = Array.isArray(mid?.children) ? mid.children : []
+    for (const cls of classLevel) {
+      push(...String(cls.value || '').split('/').filter(Boolean))
+    }
+  }
+}
+
 function collectClassesFromScopes(scopes) {
   const result = []
   const seen = new Set()
@@ -383,22 +404,7 @@ function collectClassesFromScopes(scopes) {
   }
   for (const v of (Array.isArray(scopes) ? scopes : [])) {
     if (!v) continue
-    const parts = String(v).split('/').filter(Boolean)
-    if (parts.length >= 3) {
-      push(parts[0], parts[1], parts[2])
-      continue
-    }
-    const node = findNodeByValue(scopeTreeRef.value, v)
-    const level1 = Array.isArray(node?.children) ? node.children : []
-    for (const mid of level1) {
-      if (parts.length === 2) {
-        push(...String(mid.value || '').split('/').filter(Boolean))
-      } else {
-        for (const c of (Array.isArray(mid?.children) ? mid.children : [])) {
-          push(...String(c.value || '').split('/').filter(Boolean))
-        }
-      }
-    }
+    expandScopeValue(v, push)
   }
   return result
 }

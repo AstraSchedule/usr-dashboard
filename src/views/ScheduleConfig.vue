@@ -10,7 +10,7 @@ import {
   useMessage
 } from "naive-ui";
 import ConfirmPasswordModal from '@/components/ConfirmPasswordModal.vue';
-import { verifyPassword, confirmAction } from '@/api/auth.js'
+import { confirmAction } from '@/api/auth.js'
 import {computed, h, reactive, ref} from "vue";
 import axios from "axios";
 import {APISRV} from "@/global.js";

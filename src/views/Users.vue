@@ -28,7 +28,7 @@ const editId = ref(null)
 const form = ref({username: '', password: '', role: 'class_w', scope: '', must_change_pwd: true, must_change_username: false})
 let skipScopeReset = false
 
-axios.get(`${APISRV}/web/structure`).then(r => { rawScopeTree.value = r.data || [] }).catch(() => {})
+axios.get(`${APISRV}/web/structure`).then(r => { rawScopeTree.value = r.data || [] }).catch(e => { console.warn('[users] 结构树获取失败', e) }) // NOSONAR: 页面组件引入顶层 await 会变成异步组件、要求 Suspense 包裹
 
 const {loading: listLoading, run: fetchUsers} = useRequest(listUsers, {
   manual: false,
@@ -40,14 +40,15 @@ const {loading: listLoading, run: fetchUsers} = useRequest(listUsers, {
 const treeData = ref([])
 const filteredTreeData = ref([])
 
+function mapTreeNode(n, parentKey) {
+  const key = parentKey ? parentKey + '/' + n.text : n.text
+  const node = {value: key, label: n.text}
+  if (n.children?.length) node.children = n.children.map(c => mapTreeNode(c, key))
+  return node
+}
+
 function buildTreeData(tree) {
-  function mapNode(n, parentKey) {
-    const key = parentKey ? parentKey + '/' + n.text : n.text
-    const node = {value: key, label: n.text}
-    if (n.children?.length) node.children = n.children.map(c => mapNode(c, key))
-    return node
-  }
-  return (tree || []).map(s => mapNode(s, ''))
+  return (tree || []).map(s => mapTreeNode(s, ''))
 }
 
 function filterTreeByRole(tree, role) {
@@ -85,7 +86,20 @@ const columns = [
 ]
 
 const {loading: saveLoading, run: runSave} = useRequest(() => {
-  if (isEdit.value) { const p = {username: form.value.username, role: form.value.role, scope: form.value.scope, must_change_pwd: form.value.must_change_pwd, must_change_username: form.value.must_change_username}; if (form.value.password) p.password = form.value.password; return updateUser(editId.value, p) }
+  if (isEdit.value) {
+    const p = {
+      username: form.value.username,
+      role: form.value.role,
+      scope: form.value.scope,
+      must_change_pwd: form.value.must_change_pwd,
+      must_change_username: form.value.must_change_username
+    }
+    // 密码留空表示不修改：只有填了才带上该字段
+    if (form.value.password) {
+      p.password = form.value.password
+    }
+    return updateUser(editId.value, p)
+  }
   return createUser({username: form.value.username, password: form.value.password, role: form.value.role, scope: form.value.scope, must_change_pwd: form.value.must_change_pwd, must_change_username: form.value.must_change_username})
 }, { manual: true, onSuccess: () => { message.success(isEdit.value ? '用户更新成功' : '用户创建成功'); showModal.value = false; fetchUsers() }, onError: (e) => { message.error(e?.response?.data?.detail || '操作失败') } })
 

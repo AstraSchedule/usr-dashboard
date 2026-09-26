@@ -166,7 +166,7 @@ const userInfo = ref(getUserInfo())
 if (isLoggedIn() && !userInfo.value.username) {
   axios.get(`${APISRV}/web/auth/me`)
     .then(resp => { setUserInfo(resp.data); userInfo.value = resp.data })
-    .catch(() => {})
+    .catch(e => { console.warn('[app] 获取用户信息失败', e) }) // NOSONAR: 根组件引入顶层 await 会变成异步组件并强制 Suspense 包裹
 }
 
 // 路由变化时刷新 userInfo（登录后跳转时触发）

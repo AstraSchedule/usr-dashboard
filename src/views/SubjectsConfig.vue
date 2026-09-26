@@ -112,7 +112,7 @@ const previewCode = computed(() => JSON.stringify(dynamicForm, null, 2));
         </NCard>
         <NCard title="配置表单">
             <n-form ref="formRef" :model="dynamicForm" class="center" :show-label="false">
-                <n-form-item class="center" v-for="(item, index) in zip(dynamicForm.abbr, dynamicForm.fullName)">
+                <n-form-item :key="index" class="center" v-for="(item, index) in zip(dynamicForm.abbr, dynamicForm.fullName)">
                     <n-flex justify="center" size="large" class="center">
                         <n-form-item
                           :key="index"

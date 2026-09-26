@@ -198,10 +198,18 @@ function enterRotationView() {
   message.info('当前条目不是单一的每周轮换，轮换表保存时会展开为 ' + rotationRows.value.length + ' 条每周轮换条目')
 }
 
+// 把轮换表当前编辑写回条目列表。离开该视图、或从它直接切到逐节轮换时都要先落一次：
+// 否则轮换表里刚改的内容不会进入 form.entries，collapse 读到旧条目、保存时静默丢失
+function flushRotationView() {
+  const generated = rotationToEntries()
+  if (generated.length > 0) form.entries = generated
+}
+
 function switchView(mode) {
   if (mode === viewMode.value) return
   if (mode === 'period') {
     if (!periodRotationAvailable.value) return
+    if (viewMode.value === 'rotation') flushRotationView()
     enterPeriodView()
     viewMode.value = mode
     return
@@ -210,8 +218,7 @@ function switchView(mode) {
   if (mode === 'rotation') {
     enterRotationView()
   } else if (viewMode.value === 'rotation') {
-    const generated = rotationToEntries()
-    if (generated.length > 0) form.entries = generated
+    flushRotationView()
   }
   viewMode.value = mode
 }

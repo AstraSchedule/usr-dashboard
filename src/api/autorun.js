@@ -472,3 +472,11 @@ export async function fetchTimetableDivider(school, grade) {
     return { divider: {} }
   }
 }
+
+// 清理已过期的自动任务（服务端删除 status=已过期 且任务未停用的记录，返回删除条数）
+export async function deleteExpiredTasks(password) {
+  const resp = await axios.delete(`${APISRV}/web/autorun/expired`, {
+    headers: { 'X-Verify-Password': password }
+  })
+  return resp?.data
+}

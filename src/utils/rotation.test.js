@@ -7,7 +7,7 @@ import {
   dayCycleWeeks,
   expandPerDayRotation,
   importFromClassList,
-  isPeriodRotationEntry,
+  isGeneratedPeriodRotationEntry,
   mergePeriodRotationEntries,
   lcmAll
 } from './rotation.js'
@@ -91,8 +91,8 @@ test('expandPerDayRotation 按最小公倍数展开并限定星期', () => {
   assert.deepEqual(entries[3].action.schedule.periods.map(p => p.subject), ['英', '数', '物', '体'])
   assert.deepEqual(entries[4].action.schedule.periods.map(p => p.subject), ['语', '数', '化', '体'])
   assert.deepEqual(entries[5].action.schedule.periods.map(p => p.subject), ['英', '数', '政', '体'])
-  assert.equal(isPeriodRotationEntry(entries[0]), true)
-  assert.equal(isPeriodRotationEntry({ when: { kind: 'weekly', everyWeeks: 2, weekOffset: 0 }, action: { schedule: { periods: [] } } }), false)
+  assert.equal(isGeneratedPeriodRotationEntry(entries[0]), true)
+  assert.equal(isGeneratedPeriodRotationEntry({ when: { kind: 'weekly', everyWeeks: 2, weekOffset: 0 }, action: { schedule: { periods: [] } } }), false)
 })
 
 test('展开结果与旧课表 ResolveClassList 逐周逐格一致', () => {
@@ -166,27 +166,39 @@ test('mergePeriodRotationEntries 替换旧的逐节轮换条目且不碰其它�
   assert.equal(merged.entries.length, 4)
   assert.deepEqual(merged.entries.slice(0, 2), [plain, dated])
   assert.deepEqual(merged.entries.slice(2).map(e => e.when.weekdays), [[1], [1]])
-  assert.ok(merged.entries.every(e => isPeriodRotationEntry(e) || e === plain || e === dated))
+  assert.ok(merged.entries.every(e => isGeneratedPeriodRotationEntry(e) || e === plain || e === dated))
 })
 
-test('同形状但没有来源标记的手工条目不被接管', () => {
+test('周期没铺满的每周轮换条目不被接管', () => {
   const manual = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries[0]
   delete manual.action.source
-  assert.equal(isPeriodRotationEntry(manual), false)
   assert.deepEqual(collapseEntriesToPerDay([manual]), [])
   assert.deepEqual(mergePeriodRotationEntries([manual], []).entries, [manual])
 })
 
+test('没有来源标记的完整旧数据仍可识别并还原（向前兼容）', () => {
+  const legacy = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }])
+      .entries.map(entry => {
+        const copy = JSON.parse(JSON.stringify(entry))
+        delete copy.action.source
+        return copy
+      })
+  const collapsed = collapseEntriesToPerDay(legacy)
+  assert.equal(collapsed.length, 1)
+  assert.deepEqual(collapsed[0].periods[0].weeks, ['语', '英'])
+  const rebuilt = mergePeriodRotationEntries(legacy, collapsed).entries
+  assert.equal(rebuilt.length, 2)
+  assert.deepEqual(rebuilt.map(entry => entry.action.schedule.periods[0].subject), ['语', '英'])
+})
+
 test('带备注 / 停用 / 周期范围的条目不被逐节轮换视图接管', () => {
-  const base = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries[0]
-  const clone = () => JSON.parse(JSON.stringify(base))
-  const withNote = {...clone(), note: '手工备注'}
-  const disabled = {...clone(), enabled: false}
-  const dated = {...clone(), when: {...clone().when, startDate: '2026-09-01', endDate: '2026-10-01'}}
-  assert.equal(isPeriodRotationEntry(base), true)
-  assert.equal(isPeriodRotationEntry(withNote), false)
-  assert.equal(isPeriodRotationEntry(disabled), false)
-  assert.equal(isPeriodRotationEntry(dated), false)
+  // 即便周期完整铺满，只要条目带用户自己的设置就不能接管（展开会用固定值重建条目）
+  const group = expandPerDayRotation([{ weekday: 1, periods: [{ no: 1, weeks: ['语', '英'] }] }]).entries
+  const clone = (index) => JSON.parse(JSON.stringify(group[index]))
+  const withNote = {...clone(0), note: '手工备注'}
+  const disabled = {...clone(1), enabled: false}
+  const dated = {...clone(0), when: {...clone(0).when, startDate: '2026-09-01', endDate: '2026-10-01'}}
+  assert.equal(collapseEntriesToPerDay(group).length, 1)
   assert.deepEqual(collapseEntriesToPerDay([withNote, disabled, dated]), [])
   assert.deepEqual(mergePeriodRotationEntries([withNote, disabled, dated], []).entries, [withNote, disabled, dated])
 })

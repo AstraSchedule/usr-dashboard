@@ -61,7 +61,7 @@ import {
   countExpandedEntries,
   expandPerDayRotation,
   importFromClassList,
-  isPeriodRotationEntry,
+  isGeneratedPeriodRotationEntry,
   mergePeriodRotationEntries
 } from '@/utils/rotation.js'
 
@@ -835,7 +835,7 @@ function validate() {
   for (let i = 0; i < entries.length; i++) {
     // 逐节轮换条目允许留空科目：旧课表本来就允许空槽（ResolveClassList 返回空串），
     // 强制补全会让「旧轮换课表 -> 自动任务」不再等价
-    if (viewMode.value === 'period' && isPeriodRotationEntry(entries[i])) continue
+    if (viewMode.value === 'period' && isGeneratedPeriodRotationEntry(entries[i])) continue
     const detail = (needCondition ? validateCondition(entries[i].when) : '') || validateAction(entries[i].action)
     if (detail) { message.warning('第 ' + (i + 1) + ' 条：' + detail); return false }
   }

@@ -108,72 +108,91 @@ export function expandPerDayRotation(days, makeKey) {
   return { entries, errors }
 }
 
-// 判断条目是否由「逐节轮换」视图产出、并可由它接管。
-// 权威依据是 expand 写下的 action.source 标记；形状与元数据只是二次保护 ——
-// 本视图展开时用固定值重建条目，接管带备注 / 停用 / 周期范围的条目等于静默改写用户设置。
-export function isPeriodRotationEntry(entry) {
+// 条目形状：每周轮换 + 恰好限定一天 + 课表内容。
+// 旧数据（本视图写下 source 标记之前保存的条目）也是这个形状，所以形状是向前兼容的基础。
+function matchesPeriodShape(entry) {
   const when = entry?.when || {}
   const action = entry?.action || {}
-  return action.source === PERIOD_ROTATION_SOURCE
-      && when.kind === 'weekly'
-      && Array.isArray(when.weekdays) && when.weekdays.length > 0
+  return when.kind === 'weekly'
+      && Array.isArray(when.weekdays) && when.weekdays.length === 1
+      && isWeekday(when.weekdays[0])
       && Array.isArray(action?.schedule?.periods)
-      && !when.startDate && !when.endDate
-      && !entry?.note
-      && entry?.enabled !== false
 }
 
-// 从已有条目还原视图数据：按天合并同一天的每周轮换条目，周期取各条 everyWeeks 的最小公倍数。
-// 周期短的条目按自己的偏移周期性重复填入 —— 与后端「同一天逐条覆盖」的结果一致。
-export function collapseEntriesToPerDay(entries) {
-  const buckets = new Map()
-  for (const entry of (Array.isArray(entries) ? entries : [])) {
-    if (!isPeriodRotationEntry(entry)) continue
+// 元数据干净：没有任何会被视图重写掉的用户设置（停用 / 备注 / 周期范围）
+function isCleanPeriodMeta(entry) {
+  const when = entry?.when || {}
+  return !when.startDate && !when.endDate && !entry?.note && entry?.enabled !== false
+}
+
+// 是否由本视图生成（action.source 标记）。只用于「允许留空科目」这类仅本视图产出的条目才有的放宽，
+// 不参与接管判定 —— 接管判定必须兼容没有标记的旧数据。
+export function isGeneratedPeriodRotationEntry(entry) {
+  return entry?.action?.source === PERIOD_ROTATION_SOURCE
+}
+
+// 按天收集「可由逐节轮换视图接管」的条目。一天要同时满足：
+//   1) 每条都是每周轮换 + 限定单天 + 课表内容（matchesPeriodShape）
+//   2) 元数据干净（isCleanPeriodMeta）—— 接管会重建条目，不能顺手改掉用户的设置
+//   3) 周期完整铺满：everyWeeks 相同，weekOffset 恰好覆盖 0..N-1 各一次
+// 条件 3 让「用户手写的、只有部分周次的每周轮换条目」不会被误判成本视图的数据。
+function collectManagedPeriodEntries(entries) {
+  const list = Array.isArray(entries) ? entries : []
+  const candidates = new Map()
+  for (const entry of list) {
+    if (!matchesPeriodShape(entry) || !isCleanPeriodMeta(entry)) continue
     const every = Math.floor(Number(entry.when.everyWeeks) || 0)
     const offset = Math.floor(Number(entry.when.weekOffset) || 0)
-    if (every < 1 || offset < 0 || offset >= every) continue
-    for (const raw of entry.when.weekdays) {
-      const weekday = Number(raw)
-      if (!isWeekday(weekday)) continue
-      if (!buckets.has(weekday)) buckets.set(weekday, [])
-      buckets.get(weekday).push({ every, offset, periods: entry.action.schedule.periods })
-    }
+    if (every < 2 || offset < 0 || offset >= every) continue
+    const weekday = Number(entry.when.weekdays[0])
+    if (!candidates.has(weekday)) candidates.set(weekday, [])
+    candidates.get(weekday).push({ entry, every, offset })
   }
   const days = []
-  for (const weekday of [...buckets.keys()].sort((a, b) => a - b)) {
-    const groups = buckets.get(weekday)
-    const cycle = lcmAll(groups.map(group => group.every))
+  const managed = new Set()
+  for (const weekday of [...candidates.keys()].sort((a, b) => a - b)) {
+    const group = candidates.get(weekday)
+    const cycle = group[0].every
+    if (group.some(item => item.every !== cycle)) continue
+    const byOffset = new Map()
+    let duplicated = false
+    for (const item of group) {
+      if (byOffset.has(item.offset)) { duplicated = true; break }
+      byOffset.set(item.offset, item.entry)
+    }
+    if (duplicated || byOffset.size !== cycle) continue
     const nos = new Set()
-    for (const group of groups) {
-      for (const period of group.periods) {
+    for (const item of group) {
+      for (const period of item.entry.action.schedule.periods) {
         const no = Math.floor(Number(period?.no) || 0)
         if (no > 0) nos.add(no)
       }
     }
-    const snapshots = Array.from({ length: cycle }, () => new Map())
-    for (const group of groups) {
-      for (let week = group.offset; week < cycle; week += group.every) {
-        for (const period of group.periods) {
-          const no = Math.floor(Number(period?.no) || 0)
-          if (no > 0) snapshots[week].set(no, String(period?.subject ?? ''))
-        }
-      }
-    }
     const periods = [...nos].sort((a, b) => a - b).map(no => ({
       no,
-      weeks: snapshots.map(snapshot => (snapshot.has(no) ? snapshot.get(no) : ''))
+      weeks: Array.from({ length: cycle }, (_, week) => {
+        const source = byOffset.get(week).action.schedule.periods.find(p => Number(p?.no) === no)
+        return source ? String(source.subject ?? '') : ''
+      })
     }))
     days.push({ weekday, periods })
+    for (const entry of byOffset.values()) managed.add(entry)
   }
-  return days
+  return { days, managed }
 }
 
-// 把逐节轮换的展开结果并回条目列表：替换掉原有的逐节轮换条目，其余条目原样保留、顺序不变。
+// 从已有条目还原视图数据（只取能被接管的那些天）
+export function collapseEntriesToPerDay(entries) {
+  return collectManagedPeriodEntries(entries).days
+}
+
+// 把逐节轮换的展开结果并回条目列表：替换掉被接管的条目，其余条目原样保留、顺序不变。
 // 视图之间来回切换都不能碰其它视图产生的条目（例如轮换表、单日调整）。
 export function mergePeriodRotationEntries(entries, days, makeKey) {
+  const list = Array.isArray(entries) ? entries : []
+  const { managed } = collectManagedPeriodEntries(list)
   const { entries: expanded, errors } = expandPerDayRotation(days, makeKey)
-  const kept = (Array.isArray(entries) ? entries : []).filter(entry => !isPeriodRotationEntry(entry))
-  return { entries: [...kept, ...expanded], errors }
+  return { entries: [...list.filter(entry => !managed.has(entry)), ...expanded], errors }
 }
 
 // 空槽（[] 或 ['']）视为未配置；其余保留原样，空字符串也保留（表示该周没有课）

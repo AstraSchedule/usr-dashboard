@@ -21,7 +21,7 @@
               class="app-sider"
             >
               <div class="sider-logo" :class="{ 'collapsed': collapsed }">
-                <img src="https://image-hk-1.oss-accelerate.aliyuncs.com/icon.png" alt="Logo" class="logo-img" />
+                <img src="https://cn-nb1.rains3.com/kuohublog-images/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png" alt="Logo" class="logo-img" />
                 <span v-if="!collapsed" class="logo-text">星程课表</span>
               </div>
               <n-menu

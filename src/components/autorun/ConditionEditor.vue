@@ -75,9 +75,9 @@ function onWeekdaysChange(list) {
       </template>
       <template v-else-if="kind === ConditionKind.WEEKLY">
         <span>每</span>
-        <n-input-number v-model:value="when.everyWeeks" :min="1" :max="52" :show-button="false" style="width:80px" />
+        <n-input-number v-model:value="when.everyWeeks" :min="1" :max="52" :precision="0" :show-button="false" style="width:80px" />
         <span>周的第</span>
-        <n-input-number v-model:value="weekOffsetDisplay" :min="1" :max="Math.max(1, Number(when.everyWeeks) || 1)" :show-button="false" style="width:80px" />
+        <n-input-number v-model:value="weekOffsetDisplay" :min="1" :max="Math.max(1, Number(when.everyWeeks) || 1)" :precision="0" :show-button="false" style="width:80px" />
         <span>周生效</span>
       </template>
       <template v-else-if="kind === ConditionKind.EVENT">

@@ -4,8 +4,9 @@
     <n-message-provider class="full">
       <n-dialog-provider class="full">
         <n-space vertical class="full">
-          <n-layout has-sider style="height: 100vh">
+          <n-layout :has-sider="showSider" style="height: 100vh">
             <n-layout-sider
+              v-if="showSider"
               bordered
               collapse-mode="width"
               :collapsed-width="64"
@@ -126,6 +127,9 @@ import hljs from 'highlight.js/lib/core'
 
 const router = useRouter()
 
+// 登录页（meta.noAuth）不渲染控制台侧边栏：未登录时不应出现菜单/用户信息/退出登录
+const showSider = computed(() => !router.currentRoute.value.meta?.noAuth)
+
 axios.interceptors.request.use(config => {
   const token = getToken()
   if (token) {
@@ -149,6 +153,7 @@ axios.interceptors.response.use(
     const detail = error?.response?.data?.detail
     if (error?.response?.status === 401 && !PASSWORD_ERROR_DETAILS.has(detail)) {
       removeToken()
+      removeUserInfo()
       router.replace('/login')
     }
     return Promise.reject(error)

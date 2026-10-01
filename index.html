@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <link rel="icon" href="https://static.khbit.cn/2026/09/b179a9ca48077ef92e5aea63c3bfa080.png">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 边缘对本站下发 Referrer-Policy: same-origin，跨域请求不会带 Referer，
+         网页直连后端 API 会被 WAF 的「非标 UA 挑战」判成自动化请求。
+         这里显式声明来自第一方页面的来源标识（跨域仅 origin），供 WAF 放行网页流量 -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <title>AstraSchedule · 管理后台</title>
   </head>
   <body>

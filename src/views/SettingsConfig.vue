@@ -220,7 +220,7 @@ const preview = computed(()=> JSON.stringify(buildPayload(), null, 2))
               <NInput v-model:value="dynamicForm.end_banner_text" placeholder="空则显示明日课表预览" clearable />
             </n-form-item>
             <NText depth="3" style="font-size: 12px;">
-              今日课程结束后，此处不为空则用该文案覆盖课表原位置显示（居中、不滚动）；为空则改为显示下一个有课日的课表。
+              今日课程结束后，此处不为空则用该文案覆盖课表原位置显示（居中、不滚动）；为空则改为显示下一个有课日的课表，之后 6 天都没课时只隐藏倒计时。
             </NText>
           </NCard>
           <!-- 新增：天气预警覆盖横幅设置 -->

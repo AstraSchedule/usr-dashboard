@@ -262,6 +262,28 @@ export function createEntry(type) {
   return { id: '', enabled: true, note: '', when: createCondition(ConditionKind.DATE), action: createAction(type) }
 }
 
+// 客户端配置动作：布尔项与文本项分别按各自类型取值，空串等同于「不覆盖」
+function collectClientSettings(rawSettings) {
+  const settings = {}
+  for (const opt of clientConfigSettingOptions) {
+    const value = rawSettings?.[opt.key]
+    if (typeof value === 'boolean') settings[opt.key] = value
+  }
+  for (const opt of clientConfigTextOptions) {
+    const value = rawSettings?.[opt.key]
+    if (typeof value === 'string' && value !== '') settings[opt.key] = value
+  }
+  return settings
+}
+
+// 课表动作：把 periods 收敛成固定结构，缺省字段补齐
+function normalizeSchedulePeriods(rawSchedule) {
+  const periods = rawSchedule?.periods
+  return Array.isArray(periods)
+      ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
+      : []
+}
+
 // 服务端返回的条目 -> 编辑器条目（补齐缺省字段）
 export function normalizeEntry(raw, type) {
   const entry = createEntry(type)
@@ -276,28 +298,13 @@ export function normalizeEntry(raw, type) {
   const action = raw.action || raw.content || {}
   entry.action = {...createAction(type), ...action}
   if (type === AutorunType.SCHEDULE || type === AutorunType.ALL) {
-    const periods = action?.schedule?.periods
-    entry.action.schedule = {
-      periods: Array.isArray(periods)
-          ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
-          : []
-    }
+    entry.action.schedule = {periods: normalizeSchedulePeriods(action?.schedule)}
   }
   if (type === AutorunType.LESSON_SWAP) {
     entry.action.swap = normalizeSwap(action?.swap)
   }
   if (type === AutorunType.CLIENT_CONFIG) {
-    const settings = {}
-    for (const opt of clientConfigSettingOptions) {
-      const value = action?.settings?.[opt.key]
-      if (typeof value === 'boolean') settings[opt.key] = value
-    }
-    // 文本型配置项按字符串原样保留，空串等同于「不覆盖」
-    for (const opt of clientConfigTextOptions) {
-      const value = action?.settings?.[opt.key]
-      if (typeof value === 'string' && value !== '') settings[opt.key] = value
-    }
-    entry.action.settings = settings
+    entry.action.settings = collectClientSettings(action?.settings)
   }
   return entry
 }

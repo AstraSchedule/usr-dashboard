@@ -2,8 +2,8 @@
 // 条目内容编辑器：按任务类型渲染对应的内容表单。
 // 组件不直接修改 modelValue，统一通过 update:modelValue 回传新对象（SonarQube S8951）。
 import { computed } from 'vue'
-import { NButton, NCard, NDatePicker, NFormItem, NSelect, NSpace, NText } from 'naive-ui'
-import { AutorunType, clientConfigSettingOptions, normalizeSwap } from '@/api/autorun.js'
+import { NButton, NCard, NDatePicker, NFormItem, NInput, NSelect, NSpace, NText } from 'naive-ui'
+import { AutorunType, clientConfigSettingOptions, clientConfigTextOptions, normalizeSwap } from '@/api/autorun.js'
 
 const props = defineProps({
   type: { type: Number, required: true },
@@ -89,6 +89,20 @@ function onSettingChange(key, state) {
   else settings[key] = state === 'on'
   patch({ settings })
 }
+
+// 文本型配置项：空串等同于「不覆盖」，直接删除键
+function textSettingValue(key) {
+  const value = props.modelValue.settings?.[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function onTextSettingChange(key, value) {
+  const settings = {...props.modelValue.settings}
+  const text = String(value || '')
+  if (text === '') delete settings[key]
+  else settings[key] = text
+  patch({ settings })
+}
 </script>
 
 <template>
@@ -138,6 +152,11 @@ function onSettingChange(key, state) {
           <span style="width:90px;text-align:right;">{{ opt.label }}</span>
           <n-select :value="settingState(opt.key)" :options="settingStateOptions" style="width:120px"
                     @update:value="v => onSettingChange(opt.key, v)" />
+        </n-space>
+        <n-space v-for="opt in clientConfigTextOptions" :key="opt.key" align="center">
+          <span style="width:90px;text-align:right;">{{ opt.label }}</span>
+          <NInput :value="textSettingValue(opt.key)" :placeholder="opt.placeholder" clearable style="width:220px"
+                  @update:value="v => onTextSettingChange(opt.key, v)" />
         </n-space>
       </n-space>
       <n-text depth="3" style="font-size:12px;">

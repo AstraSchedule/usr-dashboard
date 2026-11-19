@@ -775,6 +775,7 @@ function cleanCondition(when) {
     out.cron = String(when.cron || '').trim()
     out.duration = Number(when.duration) || 0
   }
+  // 明天没课没有任何附加参数，保留 kind 即可
   if (Array.isArray(when.weekdays) && when.weekdays.length > 0) out.weekdays = when.weekdays.map(Number)
   return out
 }

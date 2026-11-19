@@ -30,7 +30,9 @@ export const ConditionKind = {
   RANGE: 'range',
   WEEKLY: 'weekly',
   EVENT: 'event',
-  CRON: 'cron'
+  CRON: 'cron',
+  // 明天没课：只在客户端求值（服务端解析课表时没有「明天是否有课」的上下文）
+  TOMORROW_NO_CLASS: 'tomorrow_no_class'
 }
 
 export const conditionKindOptions = [
@@ -38,7 +40,8 @@ export const conditionKindOptions = [
   { label: '日期范围', value: ConditionKind.RANGE },
   { label: '每周轮换', value: ConditionKind.WEEKLY },
   { label: '时刻事件', value: ConditionKind.EVENT },
-  { label: 'cron 表达式', value: ConditionKind.CRON }
+  { label: 'cron 表达式', value: ConditionKind.CRON },
+  { label: '明天没课', value: ConditionKind.TOMORROW_NO_CLASS }
 ]
 
 export const EventKind = {
@@ -59,6 +62,12 @@ export const clientConfigSettingOptions = [
   { key: 'isDuringClassHidden', label: '上课隐藏' },
   { key: 'isAlwaysMinimized', label: '始终缩小' },
   { key: 'isDuringClassCountdown', label: '课上计时' }
+]
+
+// 文本型配置项：取值是文案而不是开关，编辑器用输入框而不是三态选择
+// 与服务端 clientConfigTextSettingKeys 保持一致
+export const clientConfigTextOptions = [
+  { key: 'end_banner_text', label: '结束横幅文案', placeholder: '留空则不覆盖，沿用课表配置里的静态文案' }
 ]
 
 export const weekdayOptions = [
@@ -253,6 +262,28 @@ export function createEntry(type) {
   return { id: '', enabled: true, note: '', when: createCondition(ConditionKind.DATE), action: createAction(type) }
 }
 
+// 客户端配置动作：布尔项与文本项分别按各自类型取值，空串等同于「不覆盖」
+function collectClientSettings(rawSettings) {
+  const settings = {}
+  for (const opt of clientConfigSettingOptions) {
+    const value = rawSettings?.[opt.key]
+    if (typeof value === 'boolean') settings[opt.key] = value
+  }
+  for (const opt of clientConfigTextOptions) {
+    const value = rawSettings?.[opt.key]
+    if (typeof value === 'string' && value !== '') settings[opt.key] = value
+  }
+  return settings
+}
+
+// 课表动作：把 periods 收敛成固定结构，缺省字段补齐
+function normalizeSchedulePeriods(rawSchedule) {
+  const periods = rawSchedule?.periods
+  return Array.isArray(periods)
+      ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
+      : []
+}
+
 // 服务端返回的条目 -> 编辑器条目（补齐缺省字段）
 export function normalizeEntry(raw, type) {
   const entry = createEntry(type)
@@ -267,23 +298,13 @@ export function normalizeEntry(raw, type) {
   const action = raw.action || raw.content || {}
   entry.action = {...createAction(type), ...action}
   if (type === AutorunType.SCHEDULE || type === AutorunType.ALL) {
-    const periods = action?.schedule?.periods
-    entry.action.schedule = {
-      periods: Array.isArray(periods)
-          ? periods.map(p => ({no: Number(p?.no) || 0, subject: String(p?.subject || '')}))
-          : []
-    }
+    entry.action.schedule = {periods: normalizeSchedulePeriods(action?.schedule)}
   }
   if (type === AutorunType.LESSON_SWAP) {
     entry.action.swap = normalizeSwap(action?.swap)
   }
   if (type === AutorunType.CLIENT_CONFIG) {
-    const settings = {}
-    for (const opt of clientConfigSettingOptions) {
-      const value = action?.settings?.[opt.key]
-      if (typeof value === 'boolean') settings[opt.key] = value
-    }
-    entry.action.settings = settings
+    entry.action.settings = collectClientSettings(action?.settings)
   }
   return entry
 }
@@ -312,6 +333,8 @@ export function describeCondition(when) {
     }
     case ConditionKind.CRON:
       return when.duration > 0 ? `cron ${when.cron}（持续 ${when.duration} 分钟）` : `cron ${when.cron}`
+    case ConditionKind.TOMORROW_NO_CLASS:
+      return '明天没课'
     default:
       return String(when.kind || '未知条件')
   }
@@ -328,7 +351,10 @@ export function describeEntry(task, entry) {
   if (type === AutorunType.CLIENT_CONFIG) {
     const on = clientConfigSettingOptions.filter(o => action.settings?.[o.key] === true).map(o => o.label)
     const off = clientConfigSettingOptions.filter(o => action.settings?.[o.key] === false).map(o => `关闭${o.label}`)
-    return [...on, ...off].join('、') || '未配置'
+    const texts = clientConfigTextOptions
+        .filter(o => typeof action.settings?.[o.key] === 'string' && action.settings[o.key] !== '')
+        .map(o => `${o.label}：${action.settings[o.key]}`)
+    return [...on, ...off, ...texts].join('、') || '未配置'
   }
   return ''
 }

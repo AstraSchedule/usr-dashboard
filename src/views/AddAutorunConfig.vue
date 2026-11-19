@@ -279,7 +279,7 @@ watch(() => form.type, (type, oldType) => {
   }
   detectedNeedRaw.value = null
   detectedTimetableId.value = ''
-  loadGradeOptions()
+  void loadGradeOptions()
 })
 
 // ============================================================
@@ -354,15 +354,15 @@ function pickSchoolGrade(selected) {
     const [school, grade, cls] = clsVal.split('/')
     return {school, grade, cls}
   }
-  const gradeVal = arr.find(v => v && v.split('/').length === 2)
+  const gradeVal = arr.find(v => v?.split('/').length === 2)
   if (gradeVal) {
     const [school, grade] = gradeVal.split('/')
     return {school, grade}
   }
-  const schoolVal = arr.find(v => v && v.split('/').length === 1)
+  const schoolVal = arr.find(v => v?.split('/').length === 1)
   if (schoolVal) {
     const node = findNodeByValue(scopeTreeRef.value, schoolVal)
-    const firstGrade = (node?.children || []).find(n => n.value && n.value.split('/').length === 2)
+    const firstGrade = (node?.children || []).find(n => n.value?.split('/').length === 2)
     if (firstGrade) {
       const [school, grade] = firstGrade.value.split('/')
       return {school, grade}
@@ -506,7 +506,7 @@ async function loadGradeOptions() {
 watch(() => [form.type, JSON.stringify(form.scope)], () => {
   detectedNeedRaw.value = null
   detectedTimetableId.value = ''
-  loadGradeOptions()
+  void loadGradeOptions()
 })
 
 function onScopeChange(v) {
@@ -735,7 +735,7 @@ function applyTask(d) {
       : [makeEntry(form.type)]
   // 必须在赋值之后再注册：nextTick 回调一定排在本次 watcher 队列之后
   nextTick(() => { suppressTypeWatch.value = false })
-  loadGradeOptions()
+  void loadGradeOptions()
 }
 
 const { run: runGet, loading: loadingGet } = useRequest(() => getTask(route.params.id), {
@@ -775,6 +775,7 @@ function cleanCondition(when) {
     out.cron = String(when.cron || '').trim()
     out.duration = Number(when.duration) || 0
   }
+  // 明天没课没有任何附加参数，保留 kind 即可
   if (Array.isArray(when.weekdays) && when.weekdays.length > 0) out.weekdays = when.weekdays.map(Number)
   return out
 }

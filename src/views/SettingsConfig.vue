@@ -25,6 +25,8 @@ const dynamicForm = reactive({
   countdownDate: Date.now(),
   week_display: true,
   banner_text: '',
+  // 结束横幅：今日课程结束后覆盖课表位置显示；留空则不做结束横幅，直接进入明日课表预览
+  end_banner_text: '',
   // 新增：存在天气预警时，用预警信息替代横幅文本
   weather_alert_override: false,
   // 新增：是否使用简略的天气预警信息
@@ -55,6 +57,7 @@ function buildPayload(){
     countdown_target,
     week_display: dynamicForm.week_display,
     banner_text: dynamicForm.banner_text,
+    end_banner_text: dynamicForm.end_banner_text,
     // 新增字段随 payload 一并提交
     weather_alert_override: dynamicForm.weather_alert_override,
     weather_alert_brief: dynamicForm.weather_alert_brief,
@@ -123,6 +126,7 @@ useRequest(getSettings,{
     countdown_target:'hidden',
     week_display:true,
     banner_text:'',
+    end_banner_text:'',
     weather_alert_override:false,
     weather_alert_brief:false,
     css_style:{},
@@ -141,6 +145,7 @@ useRequest(getSettings,{
     }
     dynamicForm.week_display = data.week_display
     dynamicForm.banner_text = data.banner_text
+    dynamicForm.end_banner_text = data.end_banner_text || ''
     // 新增字段回填（后端未返回时默认 false）
     dynamicForm.weather_alert_override = !!data.weather_alert_override
     dynamicForm.weather_alert_brief = !!data.weather_alert_brief
@@ -209,6 +214,14 @@ const preview = computed(()=> JSON.stringify(buildPayload(), null, 2))
             <n-form-item label="banner_text">
               <NInput v-model:value="dynamicForm.banner_text" placeholder="空则不显示" clearable />
             </n-form-item>
+          </NCard>
+          <NCard size="small" title="结束横幅">
+            <n-form-item label="end_banner_text">
+              <NInput v-model:value="dynamicForm.end_banner_text" placeholder="空则显示明日课表预览" clearable />
+            </n-form-item>
+            <NText depth="3" style="font-size: 12px;">
+              今日课程结束后，此处不为空则用该文案覆盖课表原位置显示（居中、不滚动）；为空则改为显示下一个有课日的课表，之后 6 天都没课时只隐藏倒计时。
+            </NText>
           </NCard>
           <!-- 新增：天气预警覆盖横幅设置 -->
           <NCard size="small" title="天气预警">

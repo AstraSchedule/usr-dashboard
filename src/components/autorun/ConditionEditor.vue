@@ -18,10 +18,10 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue'])
 
-// 时刻事件只对客户端配置有意义：服务端在课表解析里把它当作「当天生效」，容易误解
+// 时刻事件与「明天没课」只对客户端配置有意义：前者服务端会当成「当天生效」，后者服务端没有课表上下文
 const kindOptions = computed(() => props.type === AutorunType.CLIENT_CONFIG
   ? conditionKindOptions
-  : conditionKindOptions.filter(o => o.value !== ConditionKind.EVENT))
+  : conditionKindOptions.filter(o => o.value !== ConditionKind.EVENT && o.value !== ConditionKind.TOMORROW_NO_CLASS))
 
 const when = computed(() => props.modelValue)
 const kind = computed(() => when.value?.kind || ConditionKind.DATE)

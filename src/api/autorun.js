@@ -67,7 +67,7 @@ export const clientConfigSettingOptions = [
 // 文本型配置项：取值是文案而不是开关，编辑器用输入框而不是三态选择
 // 与服务端 clientConfigTextSettingKeys 保持一致
 export const clientConfigTextOptions = [
-  { key: 'end_banner_text', label: '结束横幅文案', placeholder: '空则不显示结束横幅' }
+  { key: 'end_banner_text', label: '结束横幅文案', placeholder: '留空则不覆盖，沿用课表配置里的静态文案' }
 ]
 
 export const weekdayOptions = [
